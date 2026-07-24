@@ -7,22 +7,27 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
 import datetime
 import os
 import calendar
 import sys
 
+# ============================================================
+# НАСТРОЙКА CustomTkinter
+# ============================================================
+ctk.set_appearance_mode("dark")      # "dark", "light", "system"
+ctk.set_default_color_theme("blue")  # "blue", "dark-blue", "green"
 
-
+# ============================================================
+# ПУТЬ К ПАПКЕ (для портативной версии)
+# ============================================================
 def get_base_path():
     """Возвращает путь к папке, где находится исполняемый файл (или скрипт)"""
     if getattr(sys, 'frozen', False):
-        # Запущено как .exe
         return os.path.dirname(sys.executable)
     else:
-        # Запущено как .py
         return os.path.dirname(os.path.abspath(__file__))
 
 # ============================================================
@@ -56,7 +61,6 @@ def load_spravochnik(filename):
             lines = [line.strip() for line in f.readlines() if line.strip()]
         return lines
     except FileNotFoundError:
-        # Если файла нет, создаём с данными по умолчанию
         print(f"⚠️ Файл {filename} не найден, создаём с данными по умолчанию")
         return []
 
@@ -93,7 +97,6 @@ MONTHS_RU = {
     9: 'сентября', 10: 'октября', 11: 'ноября', 12: 'декабря'
 }
 
-# Добавьте после MONTHS_RU:
 MONTHS_RU_NOMINATIVE = {
     1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель',
     5: 'Май', 6: 'Июнь', 7: 'Июль', 8: 'Август',
@@ -107,7 +110,7 @@ MONTHS_RU_UPPER = {
 }
 
 # ============================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (ПАРСЕРЫ)
 # ============================================================
 def normalize_time(time_str):
     if not time_str or time_str == '':
@@ -512,9 +515,7 @@ def parse_oar_graph(file_path, dept_name):
     months_found = set()
     years_found = set()
     
-    # ============================================================
-    # ПОИСК МЕСЯЦА В ТЕКСТЕ (для ОАР)
-    # ============================================================
+    # Поиск месяца в тексте (для ОАР)
     month_names_ru = {
         'январь': 1, 'февраль': 2, 'март': 3, 'апрель': 4,
         'май': 5, 'июнь': 6, 'июль': 7, 'август': 8,
@@ -529,7 +530,6 @@ def parse_oar_graph(file_path, dept_name):
                 months_found.add(month_num)
                 print(f"   📅 Найден месяц в тексте: {month_name} ({month_num})")
     
-    # Ищем строку с Ф.И.О.
     for i, row in df.iterrows():
         row_str = ' '.join(str(v) for v in row.values if pd.notna(v))
         if 'Ф.И.О.' in row_str:
@@ -582,6 +582,92 @@ def parse_oar_graph(file_path, dept_name):
     
     return result, dept_name, months_found if months_found else None, years_found if years_found else None
 
+def _parse_surgery_text(text, dept_name):
+    """Парсит текст из PDF (корректная привязка дат)"""
+    result = {}
+    months_found = set()
+    years_found = set()
+    lines = text.split('\n')
+    
+    date_pattern = re.compile(r'(\d{2})/(\d{2})/(\d{4})')
+    time_pattern = re.compile(r'(\d{2}):(\d{2})\s*[-—]\s*(\d{2}):(\d{2})')
+    
+    # Собираем все строки с данными
+    parsed_entries = []
+    current_day = None
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        if 'Утверждаю' in line or 'Хирургическое' in line or 'График' in line:
+            continue
+        
+        date_match = date_pattern.search(line)
+        if date_match:
+            day = int(date_match.group(1))
+            month = int(date_match.group(2))
+            year = int(date_match.group(3))
+            months_found.add(month)
+            years_found.add(year)
+            current_day = day
+            line = date_pattern.sub('', line).strip()
+        
+        if current_day is None:
+            continue
+        
+        if not line:
+            continue
+        
+        time_match = time_pattern.search(line)
+        if time_match:
+            time_str = f"{time_match.group(1)}/{time_match.group(3)}"
+            normalized = normalize_time(time_str)
+            doctor_part = line[:time_match.start()].strip()
+            doctor = ' '.join(doctor_part.split())
+            if doctor and is_valid_doctor_name(doctor):
+                parsed_entries.append((current_day, doctor, normalized))
+        else:
+            alt_time_match = re.search(r'(\d{2}:\d{2})\s*[-—]\s*(\d{2}:\d{2})', line)
+            if alt_time_match:
+                time_str = f"{alt_time_match.group(1)[:2]}/{alt_time_match.group(2)[:2]}"
+                normalized = normalize_time(time_str)
+                doctor_part = line[:alt_time_match.start()].strip()
+                doctor = ' '.join(doctor_part.split())
+                if doctor and is_valid_doctor_name(doctor):
+                    parsed_entries.append((current_day, doctor, normalized))
+    
+    # Корректная привязка дат
+    day_doctors = {}
+    for day, doctor, time_str in parsed_entries:
+        if day not in day_doctors:
+            day_doctors[day] = []
+        day_doctors[day].append((doctor, time_str))
+    
+    sorted_days = sorted(day_doctors.keys())
+    
+    for i, day in enumerate(sorted_days):
+        doctors = day_doctors[day]
+        first_doctor = doctors[0]
+        if day not in result:
+            result[day] = {}
+        result[day][(first_doctor[0], dept_name)] = first_doctor[1]
+        
+        if len(doctors) > 1 and i + 1 < len(sorted_days):
+            next_day = sorted_days[i + 1]
+            for doctor, time_str in doctors[1:]:
+                if next_day not in result:
+                    result[next_day] = {}
+                result[next_day][(doctor, dept_name)] = time_str
+        elif len(doctors) > 1 and i + 1 == len(sorted_days):
+            for doctor, time_str in doctors[1:]:
+                if day not in result:
+                    result[day] = {}
+                result[day][(doctor, dept_name)] = time_str
+    
+    return result, months_found, years_found
+
 def parse_surgery_pdf(file_path, dept_name):
     print(f"\n   🔍 Парсим {Path(file_path).name} (PDF)...")
     
@@ -593,7 +679,6 @@ def parse_surgery_pdf(file_path, dept_name):
     months_found = set()
     years_found = set()
     
-    # Определяем отделение как "Хирургия"
     dept_name = "Хирургия"
     
     try:
@@ -624,128 +709,34 @@ def parse_surgery_pdf(file_path, dept_name):
     print(f"   📅 Найдено {len(result)} дней с дежурствами, месяц: {months_found}, год: {years_found}")
     return result, dept_name, months_found, years_found
 
-def _parse_surgery_text(text, dept_name):
-    """Парсит текст из PDF (корректная привязка дат)"""
-    result = {}
-    months_found = set()
-    years_found = set()
-    lines = text.split('\n')
+def parse_surgery_txt(file_path, dept_name):
+    print(f"\n   🔍 Парсим {Path(file_path).name} (TXT)...")
     
-    date_pattern = re.compile(r'(\d{2})/(\d{2})/(\d{4})')
-    time_pattern = re.compile(r'(\d{2}):(\d{2})\s*[-—]\s*(\d{2}):(\d{2})')
+    encodings = ['utf-8-sig', 'cp1251', 'cp866', 'koi8-r', 'latin-1']
+    lines = None
     
-    # Собираем все строки с данными
-    parsed_entries = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
+    for enc in encodings:
+        try:
+            with open(file_path, 'r', encoding=enc) as f:
+                lines = f.readlines()
+                break
+        except UnicodeDecodeError:
             continue
-        
-        if 'Утверждаю' in line or 'Хирургическое' in line or 'График' in line:
-            continue
-        
-        date_match = date_pattern.search(line)
-        if date_match:
-            day = int(date_match.group(1))
-            month = int(date_match.group(2))
-            year = int(date_match.group(3))
-            months_found.add(month)
-            years_found.add(year)
-            # Удаляем дату из строки
-            line = date_pattern.sub('', line).strip()
-            
-            # Сохраняем день как "активный"
-            current_day = day
-        else:
-            # Используем последний известный день
-            if 'current_day' not in locals():
-                continue
-        
-        # Если строка пустая после удаления даты — пропускаем
-        if not line:
-            continue
-        
-        # Ищем время
-        time_match = time_pattern.search(line)
-        if time_match:
-            time_str = f"{time_match.group(1)}/{time_match.group(3)}"
-            normalized = normalize_time(time_str)
-            doctor_part = line[:time_match.start()].strip()
-            doctor = ' '.join(doctor_part.split())
-            if doctor and is_valid_doctor_name(doctor):
-                parsed_entries.append((current_day, doctor, normalized))
-        else:
-            # Пробуем найти время в альтернативном формате
-            alt_time_match = re.search(r'(\d{2}:\d{2})\s*[-—]\s*(\d{2}:\d{2})', line)
-            if alt_time_match:
-                time_str = f"{alt_time_match.group(1)[:2]}/{alt_time_match.group(2)[:2]}"
-                normalized = normalize_time(time_str)
-                doctor_part = line[:alt_time_match.start()].strip()
-                doctor = ' '.join(doctor_part.split())
-                if doctor and is_valid_doctor_name(doctor):
-                    parsed_entries.append((current_day, doctor, normalized))
     
-    # ============================================================
-    # КОРРЕКТНАЯ ПРИВЯЗКА ДАТ (исправление)
-    # ============================================================
-    # Проблема: в PDF строки идут так:
-    #   день 1: Закороев
-    #   день 2: Долгалёв
-    #   день 2: Рихан
-    #   день 3: Скаковский
-    #   
-    # Но парсер видит:
-    #   день 1: Закороев
-    #   день 1: Долгалёв   ← ОШИБКА
-    #   день 2: Рихан
-    #   день 3: Скаковский
-    #
-    # Исправление: для каждого дня берём ТОЛЬКО ПЕРВОГО врача,
-    # а остальных привязываем к следующему дню.
+    if lines is None:
+        with open(file_path, 'rb') as f:
+            raw = f.read()
+            lines = raw.decode('utf-8', errors='ignore').splitlines()
     
-    result = {}
-    day_doctors = {}
+    text = '\n'.join(lines)
+    result, months, years = _parse_surgery_text(text, dept_name)
     
-    # Группируем по дням
-    for day, doctor, time_str in parsed_entries:
-        if day not in day_doctors:
-            day_doctors[day] = []
-        day_doctors[day].append((doctor, time_str))
-    
-    # Теперь для каждого дня берём первого врача,
-    # а остальных переносим на следующий день
-    sorted_days = sorted(day_doctors.keys())
-    
-    for i, day in enumerate(sorted_days):
-        doctors = day_doctors[day]
-        
-        # Первый врач остаётся в текущем дне
-        first_doctor = doctors[0]
-        if day not in result:
-            result[day] = {}
-        result[day][(first_doctor[0], dept_name)] = first_doctor[1]
-        
-        # Остальные врачи переносятся на следующий день
-        if len(doctors) > 1 and i + 1 < len(sorted_days):
-            next_day = sorted_days[i + 1]
-            for doctor, time_str in doctors[1:]:
-                if next_day not in result:
-                    result[next_day] = {}
-                result[next_day][(doctor, dept_name)] = time_str
-        elif len(doctors) > 1 and i + 1 == len(sorted_days):
-            # Если это последний день, оставляем всех врачей в нём
-            for doctor, time_str in doctors[1:]:
-                if day not in result:
-                    result[day] = {}
-                result[day][(doctor, dept_name)] = time_str
-    
-    return result, months_found, years_found
+    print(f"   📅 Найдено {len(result)} дней с дежурствами, месяц: {months}, год: {years}")
+    return result, dept_name, months, years
 
 # ============================================================
 # СОХРАНЕНИЕ В WORD
 # ============================================================
-
 def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file, 
                  rukovoditel_text, ploshadka_text, month_num, year, month_name):
     """Сохраняет сводный график в Word с тремя колонками и шапкой"""
@@ -902,24 +893,8 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
             all_blocks.append(block_lines)
     
     # ============================================================
-    # ФУНКЦИИ ДЛЯ РАСПРЕДЕЛЕНИЯ
+    # РАСПРЕДЕЛЕНИЕ ПО СТРАНИЦАМ
     # ============================================================
-    def calc_block_height_pt(block, is_last=False):
-        line_height_pt = 12
-        header_height_pt = 13
-        empty_line_pt = 12
-        
-        total = 0
-        for i, line in enumerate(block):
-            if i == 0:
-                total += header_height_pt
-            else:
-                total += line_height_pt
-        if not is_last:
-            total += empty_line_pt
-        
-        return total
-    
     def calc_rows_for_col(blocks):
         total = 0
         for block_idx, block in enumerate(blocks):
@@ -929,14 +904,10 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
                 total += 1
         return total
     
-    # ============================================================
-    # НОВЫЙ АЛГОРИТМ РАСПРЕДЕЛЕНИЯ С ОГРАНИЧЕНИЯМИ
-    # ============================================================
     FIRST_PAGE_MAX_ROWS = 48
     OTHER_PAGE_MAX_ROWS = 59
     
     def distribute_blocks_with_limit(blocks, first_max, other_max):
-        """Распределяет блоки по страницам с учётом ограничений"""
         pages = []
         current_page = [[], [], []]
         col_heights = [0, 0, 0]
@@ -944,22 +915,17 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
         is_first_page = True
         
         for block in blocks:
-            block_height = calc_block_height_pt(block, is_last=False)
-            # Пересчитываем в строки (примерно)
-            block_rows = len(block) + 1  # +1 для пустой строки
+            block_rows = len(block) + 1
             
-            # Определяем максимальное количество строк для текущей страницы
             if is_first_page:
                 max_rows = first_max
             else:
                 max_rows = other_max
             
-            # Проверяем, помещается ли блок в текущую колонку
             if col_heights[current_col] + block_rows <= max_rows:
                 current_page[current_col].append(block)
                 col_heights[current_col] += block_rows
             else:
-                # Ищем следующую колонку
                 col_found = False
                 for next_col in range(current_col + 1, 3):
                     if col_heights[next_col] + block_rows <= max_rows:
@@ -970,36 +936,29 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
                         break
                 
                 if not col_found:
-                    # Блок не поместился — сохраняем страницу и создаём новую
                     if any(len(col) > 0 for col in current_page):
                         pages.append(current_page)
                     
-                    # Создаём новую страницу
                     current_page = [[], [], []]
                     col_heights = [0, 0, 0]
                     current_col = 0
                     is_first_page = False
                     
-                    # Добавляем блок в новую страницу
                     current_page[current_col].append(block)
                     col_heights[current_col] += block_rows
         
-        # Добавляем последнюю страницу
         if any(len(col) > 0 for col in current_page):
             pages.append(current_page)
         
         return pages
     
-    # ============================================================
-    # РАСПРЕДЕЛЯЕМ БЛОКИ
-    # ============================================================
     pages = distribute_blocks_with_limit(all_blocks, FIRST_PAGE_MAX_ROWS, OTHER_PAGE_MAX_ROWS)
     
     if not pages:
         pages = [[[], [], []]]
     
     # ============================================================
-    # ФУНКЦИЯ ДЛЯ ЗАПОЛНЕНИЯ КОЛОНКИ
+    # ЗАПОЛНЕНИЕ КОЛОНОК
     # ============================================================
     def fill_column(table, col_idx, blocks, start_row, max_rows):
         row = start_row
@@ -1100,11 +1059,9 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     folder = Path(input_folder)
     
-    # Создаём папку для результата
     output_folder = folder / "Сводный график"
     output_folder.mkdir(exist_ok=True)
     
-    # Ищем все файлы
     all_files = []
     for ext in ['*.xlsx', '*.xls', '*.csv', '*.pdf', '*.txt']:
         all_files.extend(folder.glob(ext))
@@ -1153,7 +1110,7 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
             if detected_dept and detected_dept != dept_name:
                 dept_name = detected_dept
         elif file_path.suffix.lower() == '.txt':
-            data, detected_dept, months, years = parse_surgery_pdf(file_path, dept_name)
+            data, detected_dept, months, years = parse_surgery_txt(file_path, dept_name)
             if not data:
                 print(f"   ⚠️ Не удалось прочитать TXT, пропускаем")
                 continue
@@ -1166,7 +1123,6 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
             print(f"   ⚠️ Данные не найдены для {dept_name}")
             continue
         
-        # Проверяем месяц и год
         if months:
             if selected_month not in months:
                 print(f"   ⚠️ Месяц в файле ({months}) не соответствует выбранному ({selected_month})")
@@ -1196,11 +1152,8 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     if not all_data:
         print("❌ Данные не найдены ни в одном файле!")
-        # ============================================================
-        # ПОКАЗЫВАЕМ ПОНЯТНОЕ СООБЩЕНИЕ В GUI (ДИНАМИЧЕСКОЕ)
-        # ============================================================
         try:
-            root = tk._default_root
+            root = ctk._default_root
             if root:
                 month_name_ru = MONTHS_RU_NOMINATIVE.get(selected_month, '')
                 msg = f"Данные за {month_name_ru} {selected_year} года не найдены ни в одном из графиков.\n\n"
@@ -1218,10 +1171,7 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         except:
             pass
         return False
-
-    # ============================================================
-    # ПОКАЗЫВАЕМ СПИСОК ИСКЛЮЧЁННЫХ ФАЙЛОВ (ЕСЛИ ЕСТЬ)
-    # ============================================================
+    
     if files_with_errors:
         print("\n" + "=" * 60)
         print("⚠️⚠️⚠️ Файлы, исключённые из сводного графика (не соответствуют выбранному месяцу/году):")
@@ -1233,9 +1183,8 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         print(f"   Всего исключено: {len(files_with_errors)} файлов")
         print("=" * 60)
         
-        # ПОКАЗЫВАЕМ В GUI (если есть данные)
         try:
-            root = tk._default_root
+            root = ctk._default_root
             if root and all_data:
                 msg = "Следующие файлы не соответствуют выбранному месяцу/году и были исключены:\n\n"
                 for fname, error in files_with_errors[:5]:
@@ -1246,25 +1195,21 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
                 messagebox.showwarning("Файлы исключены", msg)
         except:
             pass
-
-    # ============================================================
-    # СОРТИРОВКА ОТДЕЛЕНИЙ
-    # ============================================================
+    
     sorted_depts = sorted(
         doctors_by_dept.keys(),
         key=lambda d: (dept_order_map.get(d, 999), d)
     )
-
+    
     print("\n" + "=" * 60)
     print(f"✅ Всего найдено {len(all_data)} дней с дежурствами")
     print(f"📊 Найдено отделений: {len(doctors_by_dept)}")
     for dept in sorted_depts:
         abbr = get_dept_abbr(dept)
         print(f"   {dept} ({abbr}): {len(doctors_by_dept[dept])} врачей")
-
+    
     month_name = MONTHS_RU_UPPER.get(selected_month, 'АВГУСТ')
     
-    # Сохраняем TXT
     _, last_day = calendar.monthrange(selected_year, selected_month)
     weekday_names = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
     weekdays = []
@@ -1296,7 +1241,6 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     print(f"\n💾 TXT сохранён: {txt_file}")
     
-    # Сохраняем Word
     docx_file = output_folder / f"сводный_график_{month_lower}_{selected_year}.docx"
     save_to_word(all_data, doctors_by_dept, sorted_depts, docx_file,
                  rukovoditel_text, ploshadka_text, selected_month, selected_year, month_name)
@@ -1308,21 +1252,37 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     return True
 
 # ============================================================
-# ГРАФИЧЕСКИЙ ИНТЕРФЕЙС
+# ГЛАВНОЕ ПРИЛОЖЕНИЕ (CustomTkinter)
 # ============================================================
-class App:
-    def __init__(self, root):
-        self.root = root
-        root.title("Сводный график дежурств")
-        root.geometry("650x680")
-        root.resizable(False, False)
+import ctypes
+
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        
+        # Устанавливаем иконку для окна
+        try:
+            icon_path = os.path.join(get_base_path(), "icon.ico")
+            if os.path.exists(icon_path):
+                # Для окна
+                self.iconbitmap(icon_path)
+                # Для панели задач (Windows)
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("myappid")
+        except:
+            pass
+        
+        # ... остальной код ...
+        
+        self.title("Сводный график дежурств")
+        self.geometry("700x750")
+        self.minsize(650, 700)
         
         # Переменные
-        self.folder_path = tk.StringVar(value="")
-        self.rukovoditel = tk.StringVar()
-        self.ploshadka = tk.StringVar()
-        self.month_var = tk.StringVar()
-        self.year_var = tk.StringVar()
+        self.folder_path = ctk.StringVar(value="")
+        self.rukovoditel = ctk.StringVar()
+        self.ploshadka = ctk.StringVar()
+        self.month_var = ctk.StringVar()
+        self.year_var = ctk.StringVar()
         
         # Загружаем справочники
         self.rukovoditeli_list = load_spravochnik('spravochnik_rukovoditeli.txt')
@@ -1333,110 +1293,238 @@ class App:
         default_year = now.year
         if now.month == 12 and now.day > 15:
             default_year += 1
-        
         self.year_var.set(str(default_year))
         
         # Создаём интерфейс
         self.create_widgets()
-        
+    
     def create_widgets(self):
-        # Заголовок
-        tk.Label(self.root, text="Сводный график дежурств", 
-                font=("Arial", 16, "bold")).pack(pady=10)
+        # ============================================================
+        # ЗАГОЛОВОК
+        # ============================================================
+        self.label_title = ctk.CTkLabel(
+            self, 
+            text="📊 Сводный график дежурств",
+            font=ctk.CTkFont(size=22, weight="bold")
+        )
+        self.label_title.pack(pady=(20, 15))
         
-        # Рамка для выбора папки
-        frame_folder = tk.LabelFrame(self.root, text="Папка с графиками", padx=10, pady=10)
-        frame_folder.pack(fill="x", padx=20, pady=5)
+        # ============================================================
+        # ПАПКА С ГРАФИКАМИ
+        # ============================================================
+        self.frame_folder = ctk.CTkFrame(self)
+        self.frame_folder.pack(fill="x", padx=20, pady=5)
         
-        tk.Label(frame_folder, text="Выберите папку, содержащую файлы графиков отделений:").pack(anchor="w")
+        ctk.CTkLabel(
+            self.frame_folder, 
+            text="📁 Папка с графиками:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=5, pady=(5, 0))
         
-        folder_row = tk.Frame(frame_folder)
-        folder_row.pack(fill="x", pady=5)
-        tk.Entry(folder_row, textvariable=self.folder_path, width=50).pack(side="left", padx=(0,5))
-        tk.Button(folder_row, text="Обзор...", command=self.select_folder).pack(side="left")
+        folder_row = ctk.CTkFrame(self.frame_folder, fg_color="transparent")
+        folder_row.pack(fill="x", padx=5, pady=5)
         
-        # Рамка для месяца и года
-        frame_date = tk.LabelFrame(self.root, text="Период", padx=10, pady=10)
-        frame_date.pack(fill="x", padx=20, pady=5)
+        self.entry_folder = ctk.CTkEntry(
+            folder_row, 
+            textvariable=self.folder_path,
+            placeholder_text="Выберите папку с файлами графиков...",
+            width=500
+        )
+        self.entry_folder.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
-        date_row = tk.Frame(frame_date)
-        date_row.pack(fill="x", pady=5)
+        self.btn_folder = ctk.CTkButton(
+            folder_row, 
+            text="Обзор...", 
+            command=self.select_folder,
+            width=80
+        )
+        self.btn_folder.pack(side="right")
         
-        tk.Label(date_row, text="Месяц:").pack(side="left", padx=(0,10))
+        # ============================================================
+        # ПЕРИОД
+        # ============================================================
+        self.frame_date = ctk.CTkFrame(self)
+        self.frame_date.pack(fill="x", padx=20, pady=5)
+        
+        ctk.CTkLabel(
+            self.frame_date, 
+            text="📅 Период:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=5, pady=(5, 0))
+        
+        date_row = ctk.CTkFrame(self.frame_date, fg_color="transparent")
+        date_row.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(date_row, text="Месяц:").pack(side="left", padx=(0, 10))
+        
         months_list = [MONTHS_RU_NOMINATIVE[i] for i in range(1, 13)]
-        combo_month = ttk.Combobox(date_row, textvariable=self.month_var, 
-                                values=months_list, width=20)
-        combo_month.pack(side="left", padx=(0,20))
-        self.month_var.set("Август")
+        self.combo_month = ctk.CTkComboBox(
+            date_row, 
+            values=months_list,
+            width=150
+        )
+        self.combo_month.pack(side="left", padx=(0, 20))
+        self.combo_month.set("Август")
         
-        tk.Label(date_row, text="Год:").pack(side="left", padx=(0,10))
+        ctk.CTkLabel(date_row, text="Год:").pack(side="left", padx=(0, 10))
+        
         years_list = [str(y) for y in range(2024, 2031)]
-        combo_year = ttk.Combobox(date_row, textvariable=self.year_var, 
-                                values=years_list, width=10)
-        combo_year.pack(side="left")
+        self.combo_year = ctk.CTkComboBox(
+            date_row, 
+            values=years_list,
+            width=100
+        )
+        self.combo_year.pack(side="left")
+        self.combo_year.set(str(datetime.datetime.now().year))
         
-        # Рамка для руководителя
-        frame_ruk = tk.LabelFrame(self.root, text="Руководитель", padx=10, pady=10)
-        frame_ruk.pack(fill="x", padx=20, pady=5)
+        # ============================================================
+        # РУКОВОДИТЕЛЬ
+        # ============================================================
+        self.frame_ruk = ctk.CTkFrame(self)
+        self.frame_ruk.pack(fill="x", padx=20, pady=5)
+        
+        ctk.CTkLabel(
+            self.frame_ruk, 
+            text="👤 Руководитель:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=5, pady=(5, 0))
         
         if self.rukovoditeli_list:
-            tk.Label(frame_ruk, text="Выберите руководителя:").pack(anchor="w")
-            combo_ruk = ttk.Combobox(frame_ruk, textvariable=self.rukovoditel, 
-                                    values=self.rukovoditeli_list, width=80)
-            combo_ruk.pack(anchor="w", pady=5)
-            if self.rukovoditeli_list:
-                self.rukovoditel.set(self.rukovoditeli_list[1] if len(self.rukovoditeli_list) > 1 else self.rukovoditeli_list[0])
+            self.combo_ruk = ctk.CTkComboBox(
+                self.frame_ruk,
+                values=self.rukovoditeli_list,
+                width=500
+            )
+            self.combo_ruk.pack(padx=5, pady=5)
+            if len(self.rukovoditeli_list) > 1:
+                self.combo_ruk.set(self.rukovoditeli_list[1])
+            else:
+                self.combo_ruk.set(self.rukovoditeli_list[0])
         else:
-            tk.Label(frame_ruk, text="Нет данных в справочнике руководителей").pack(anchor="w")
+            ctk.CTkLabel(
+                self.frame_ruk, 
+                text="⚠️ Нет данных в справочнике руководителей"
+            ).pack(padx=5, pady=5)
         
-        # Рамка для площадки
-        frame_plo = tk.LabelFrame(self.root, text="Площадка", padx=10, pady=10)
-        frame_plo.pack(fill="x", padx=20, pady=5)
+        # ============================================================
+        # ПЛОЩАДКА
+        # ============================================================
+        self.frame_plo = ctk.CTkFrame(self)
+        self.frame_plo.pack(fill="x", padx=20, pady=5)
+        
+        ctk.CTkLabel(
+            self.frame_plo, 
+            text="🏥 Площадка:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=5, pady=(5, 0))
         
         if self.ploshadki_list:
-            tk.Label(frame_plo, text="Выберите площадку:").pack(anchor="w")
-            combo_plo = ttk.Combobox(frame_plo, textvariable=self.ploshadka, 
-                                    values=self.ploshadki_list, width=60)
-            combo_plo.pack(anchor="w", pady=5)
+            self.combo_plo = ctk.CTkComboBox(
+                self.frame_plo,
+                values=self.ploshadki_list,
+                width=500
+            )
+            self.combo_plo.pack(padx=5, pady=5)
             if self.ploshadki_list:
-                self.ploshadka.set(self.ploshadki_list[0])
+                self.combo_plo.set(self.ploshadki_list[0])
         else:
-            tk.Label(frame_plo, text="Нет данных в справочнике площадок").pack(anchor="w")
+            ctk.CTkLabel(
+                self.frame_plo, 
+                text="⚠️ Нет данных в справочнике площадок"
+            ).pack(padx=5, pady=5)
         
-        # Рамка для списка файлов
-        frame_files = tk.LabelFrame(self.root, text="Файлы в папке", padx=10, pady=10)
-        frame_files.pack(fill="both", expand=True, padx=20, pady=5)
+        # ============================================================
+        # СПИСОК ФАЙЛОВ
+        # ============================================================
+        self.frame_files = ctk.CTkFrame(self)
+        self.frame_files.pack(fill="both", expand=True, padx=20, pady=5)
         
-        self.files_listbox = tk.Listbox(frame_files, height=6)
-        self.files_listbox.pack(fill="both", expand=True)
+        ctk.CTkLabel(
+            self.frame_files, 
+            text="📄 Файлы в папке:",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=5, pady=(5, 0))
         
-        btn_refresh = tk.Button(frame_files, text="🔄 Обновить список", 
-                                command=self.refresh_files_list)
+        self.files_listbox = ctk.CTkTextbox(
+            self.frame_files,
+            height=80,
+            font=ctk.CTkFont(size=11)
+        )
+        self.files_listbox.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        btn_refresh = ctk.CTkButton(
+            self.frame_files,
+            text="🔄 Обновить список",
+            command=self.refresh_files_list,
+            width=150
+        )
         btn_refresh.pack(pady=5)
         
         # ============================================================
-        # КНОПКА "СОСТАВИТЬ СВОДНЫЙ ГРАФИК"
+        # КНОПКА ЗАПУСКА
         # ============================================================
-        btn_run = tk.Button(self.root, text="Составить сводный график", 
-                           command=self.run, bg="#4CAF50", fg="white",
-                           font=("Arial", 12, "bold"), padx=20, pady=10)
-        btn_run.pack(pady=20)
+        self.btn_run = ctk.CTkButton(
+            self,
+            text="🚀 Составить сводный график",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#4CAF50",
+            hover_color="#388E3C",
+            height=45,
+            command=self.run
+        )
+        self.btn_run.pack(pady=20, padx=20, fill="x")
         
-        # Статус
-        self.status_label = tk.Label(self.root, text="", fg="blue")
+        # ============================================================
+        # СТАТУС
+        # ============================================================
+        self.status_label = ctk.CTkLabel(
+            self,
+            text="",
+            font=ctk.CTkFont(size=12)
+        )
+        self.status_label.pack(pady=(0, 15))
+
+        # ============================================================
+        # СТАТУС (нижняя часть)
+        # ============================================================
+        self.status_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.status_frame.pack(fill="x", padx=20, pady=(0, 15))
+
+        self.status_label = ctk.CTkLabel(
+            self.status_frame,
+            text="✅ Готов к работе",
+            font=ctk.CTkFont(size=13),
+            text_color="#66BB6A"  # зелёный
+        )
         self.status_label.pack(pady=5)
+
+    def set_status(self, message, status_type="info"):
+        """
+        Обновляет статус в нижней части окна
+        status_type: "info" (синий), "success" (зелёный), "error" (красный), "warning" (оранжевый)
+        """
+        colors = {
+            "info": "#4FC3F7",
+            "success": "#66BB6A",
+            "error": "#EF5350",
+            "warning": "#FFA726"
+        }
+        color = colors.get(status_type, "#FFFFFF")
+        
+        self.status_label.configure(text=message, text_color=color)
+        self.update()
 
     def refresh_files_list(self):
         """Обновляет список файлов в папке"""
         folder = self.folder_path.get().strip()
-        self.files_listbox.delete(0, tk.END)
+        self.files_listbox.delete("0.0", "end")
         
         if not folder:
-            self.files_listbox.insert(tk.END, "⚠️ Папка не выбрана")
+            self.files_listbox.insert("0.0", "⚠️ Папка не выбрана")
             return
         
         if not os.path.exists(folder):
-            self.files_listbox.insert(tk.END, "⚠️ Папка не существует")
+            self.files_listbox.insert("0.0", "⚠️ Папка не существует")
             return
         
         try:
@@ -1444,104 +1532,144 @@ class App:
             graph_files = sorted([f for f in files if f.endswith(('.xlsx', '.xls', '.csv', '.pdf', '.txt'))])
             if graph_files:
                 for f in graph_files:
-                    self.files_listbox.insert(tk.END, f)
-                self.status_label.config(text=f"📁 Найдено {len(graph_files)} файлов", fg="green")
+                    self.files_listbox.insert("end", f + "\n")
+                self.status_label.configure(
+                    text=f"✅ Найдено {len(graph_files)} файлов",
+                    text_color="green"
+                )
             else:
-                self.files_listbox.insert(tk.END, "⚠️ Нет файлов графиков")
-                self.status_label.config(text="⚠️ В папке нет файлов графиков", fg="orange")
+                self.files_listbox.insert("0.0", "⚠️ Нет файлов графиков")
+                self.status_label.configure(
+                    text="⚠️ В папке нет файлов графиков",
+                    text_color="orange"
+                )
         except Exception as e:
-            self.files_listbox.insert(tk.END, f"❌ Ошибка: {str(e)}")
-            self.status_label.config(text=f"❌ Ошибка: {str(e)}", fg="red")
-
+            self.files_listbox.insert("0.0", f"❌ Ошибка: {str(e)}")
+            self.status_label.configure(
+                text=f"❌ Ошибка: {str(e)}",
+                text_color="red"
+            )
+    
     def select_folder(self):
         folder = filedialog.askdirectory(title="Выберите папку с графиками")
         if folder:
             self.folder_path.set(folder)
             self.refresh_files_list()
-
+    
     def run(self):
         folder = self.folder_path.get().strip()
         if not folder:
-            messagebox.showerror("Ошибка", "Выберите папку с графиками!")
+            self.set_status("❌ Ошибка: выберите папку с графиками!", "error")
             return
         
         if not os.path.exists(folder):
-            messagebox.showerror("Ошибка", f"Папка не существует: {folder}")
+            self.set_status(f"❌ Папка не существует: {folder}", "error")
             return
         
-        ruk_text = self.rukovoditel.get().strip()
+        ruk_text = self.combo_ruk.get().strip()
         if not ruk_text:
-            messagebox.showerror("Ошибка", "Выберите руководителя!")
+            self.set_status("❌ Ошибка: выберите руководителя!", "error")
             return
         
-        plo_text = self.ploshadka.get().strip()
+        plo_text = self.combo_plo.get().strip()
         if not plo_text:
-            messagebox.showerror("Ошибка", "Выберите площадку!")
+            self.set_status("❌ Ошибка: выберите площадку!", "error")
             return
         
-        # Парсим месяц (с поддержкой именительного падежа из списка)
-        month_str = self.month_var.get().strip()
-        
-        # Сначала пробуем найти в словаре именительного падежа (для отображения в списке)
-        month_names_nominative = {v: k for k, v in MONTHS_RU_NOMINATIVE.items()}
-        if month_str in month_names_nominative:
-            month_num = month_names_nominative[month_str]
+        # Парсим месяц
+        month_str = self.combo_month.get().strip()
+        month_names = {v: k for k, v in MONTHS_RU_NOMINATIVE.items()}
+        if month_str in month_names:
+            month_num = month_names[month_str]
         else:
-            # Если не нашли, пробуем в родительном падеже
             month_str_lower = month_str.lower()
-            month_names = {v.lower(): k for k, v in MONTHS_RU.items()}
-            if month_str_lower in month_names:
-                month_num = month_names[month_str_lower]
+            month_names_ru = {v.lower(): k for k, v in MONTHS_RU.items()}
+            if month_str_lower in month_names_ru:
+                month_num = month_names_ru[month_str_lower]
             else:
-                messagebox.showerror("Ошибка", f"Неверный месяц: {month_str}")
+                self.set_status(f"❌ Неверный месяц: {month_str}", "error")
                 return
         
         # Парсим год
         try:
-            year_num = int(self.year_var.get().strip())
+            year_num = int(self.combo_year.get().strip())
         except:
-            messagebox.showerror("Ошибка", "Неверный формат года!")
+            self.set_status("❌ Неверный формат года!", "error")
             return
         
-        self.status_label.config(text="⏳ Обработка...")
-        self.root.update()
+        self.set_status("⏳ Обработка... Пожалуйста, подождите", "info")
+        
+        # Отключаем кнопку
+        self.btn_run.configure(state="disabled", text="⏳ Обработка...")
+        self.update()
         
         try:
-            # Перехватываем вывод в консоль для показа в GUI
-            import io
-            from contextlib import redirect_stdout
+            # Перенаправляем вывод в переменную
+            import sys
+            from io import StringIO
             
-            # Сохраняем оригинальный stdout
-            original_stdout = sys.stdout
-            # Создаём буфер для захвата вывода
-            captured_output = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = StringIO()
             
-            # Запускаем с захватом вывода
-            with redirect_stdout(captured_output):
-                success = build_master_schedule(folder, ruk_text, plo_text, month_num, year_num)
+            success = build_master_schedule(folder, ruk_text, plo_text, month_num, year_num)
             
-            # Возвращаем stdout
-            sys.stdout = original_stdout
+            # Получаем вывод
+            output = sys.stdout.getvalue()
+            sys.stdout = old_stdout
             
-            # Показываем захваченный вывод
-            output_text = captured_output.getvalue()
-            if output_text:
-                print(output_text)  # Выводим в консоль для отладки
-            
+            # Анализируем вывод для статуса
             if success:
-                self.status_label.config(text="✅ Готово! Файлы созданы в папке 'Сводный график'", fg="green")
-                messagebox.showinfo("Успех", "Сводный график успешно создан!\nФайлы сохранены в папке 'Сводный график'")
+                # Ищем сообщение об успехе
+                if "✅" in output or "Готово" in output:
+                    self.set_status("✅ Сводный график успешно создан! Файлы в папке 'Сводный график'", "success")
+                else:
+                    self.set_status("✅ Готово! Файлы сохранены в папке 'Сводный график'", "success")
             else:
-                self.status_label.config(text="❌ Ошибка при создании графика", fg="red")
-                messagebox.showerror("Ошибка", "Не удалось создать сводный график.\nПроверьте консоль для подробностей.")
+                # Ищем причины ошибки
+                if "не найдены" in output or "не найден" in output:
+                    self.set_status("❌ Данные не найдены. Проверьте месяц в файлах", "error")
+                elif "не соответствует" in output:
+                    # Парсим месяц из сообщения
+                    import re
+                    match = re.search(r'месяц в файле.*?(\d+)', output)
+                    if match:
+                        month_in_file = int(match.group(1))
+                        month_name_ru = MONTHS_RU_NOMINATIVE.get(month_in_file, '')
+                        selected_month_name = MONTHS_RU_NOMINATIVE.get(month_num, '')
+                        self.set_status(
+                            f"⚠️ В файлах найден {month_name_ru}, а выбран {selected_month_name}. Проверьте месяц",
+                            "warning"
+                        )
+                    else:
+                        self.set_status("❌ Ошибка: файлы не соответствуют выбранному месяцу", "error")
+                else:
+                    self.set_status("❌ Ошибка при создании графика. Проверьте консоль", "error")
+            
+            # Если есть предупреждения о файлах
+            if "исключены" in output or "исключено" in output:
+                import re
+                match = re.search(r'Всего исключено:\s*(\d+)', output)
+                if match:
+                    count = int(match.group(1))
+                    if count > 0:
+                        self.set_status(
+                            f"⚠️ {count} файлов исключены (не соответствуют месяцу). Проверьте лог",
+                            "warning"
+                        )
+                
         except Exception as e:
-            self.status_label.config(text=f"❌ Ошибка: {str(e)}", fg="red")
-            messagebox.showerror("Ошибка", str(e))
+            self.set_status(f"❌ Критическая ошибка: {str(e)}", "error")
+            import traceback
+            print(traceback.format_exc())
+        
+        finally:
+            # Включаем кнопку
+            self.btn_run.configure(state="normal", text="🚀 Составить сводный график")
+            self.update()
 
 # ============================================================
 # ЗАПУСК
 # ============================================================
 if __name__ == '__main__':
-    root = tk.Tk()
-    app = App(root)
-    root.mainloop()
+    app = App()
+    app.mainloop()
