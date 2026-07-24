@@ -1049,6 +1049,9 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
 # ============================================================
 # ОСНОВНАЯ ФУНКЦИЯ
 # ============================================================
+# ============================================================
+# ОСНОВНАЯ ФУНКЦИЯ
+# ============================================================
 def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text, 
                           selected_month, selected_year):
     """Собирает сводный график из файлов в папке"""
@@ -1071,7 +1074,7 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     if not all_files:
         print("❌ Не найдено ни одного файла с графиками!")
-        return False
+        return False, [], "❌ Не найдено ни одного файла с графиками!"
     
     print(f"\n📄 Найдено {len(all_files)} файлов:")
     for f in all_files:
@@ -1152,25 +1155,8 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     if not all_data:
         print("❌ Данные не найдены ни в одном файле!")
-        try:
-            root = ctk._default_root
-            if root:
-                month_name_ru = MONTHS_RU_NOMINATIVE.get(selected_month, '')
-                msg = f"Данные за {month_name_ru} {selected_year} года не найдены ни в одном из графиков.\n\n"
-                if files_with_errors:
-                    msg += "Проверьте, что в файлах указан правильный месяц и год.\n\n"
-                    msg += "Исключённые файлы:\n"
-                    for fname, error in files_with_errors[:5]:
-                        msg += f"  • {fname}\n"
-                    if len(files_with_errors) > 5:
-                        msg += f"  ... и ещё {len(files_with_errors) - 5} файлов\n"
-                else:
-                    msg += "Возможно, в папке нет файлов графиков за выбранный период.\n"
-                    msg += "Проверьте выбранную папку и месяц."
-                messagebox.showerror("Данные не найдены", msg)
-        except:
-            pass
-        return False
+        month_name_ru = MONTHS_RU_NOMINATIVE.get(selected_month, '')
+        return False, files_with_errors, f"❌ Данные за {month_name_ru} {selected_year} не найдены! Проверьте месяц в файлах"
     
     if files_with_errors:
         print("\n" + "=" * 60)
@@ -1182,19 +1168,6 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         print("-" * 60)
         print(f"   Всего исключено: {len(files_with_errors)} файлов")
         print("=" * 60)
-        
-        try:
-            root = ctk._default_root
-            if root and all_data:
-                msg = "Следующие файлы не соответствуют выбранному месяцу/году и были исключены:\n\n"
-                for fname, error in files_with_errors[:5]:
-                    msg += f"• {fname}\n  ({error})\n"
-                if len(files_with_errors) > 5:
-                    msg += f"\n... и ещё {len(files_with_errors) - 5} файлов"
-                msg += f"\n\nВсего исключено: {len(files_with_errors)} файлов"
-                messagebox.showwarning("Файлы исключены", msg)
-        except:
-            pass
     
     sorted_depts = sorted(
         doctors_by_dept.keys(),
@@ -1249,8 +1222,7 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     print(f"   📄 TXT: {txt_file}")
     print(f"   📝 Word: {docx_file}")
     
-    return True
-
+    return True, files_with_errors, ""  # ← ВОЗВРАЩАЕМ 3 ЗНАЧЕНИЯ
 # ============================================================
 # ГЛАВНОЕ ПРИЛОЖЕНИЕ (CustomTkinter)
 # ============================================================
@@ -1475,33 +1447,37 @@ class App(ctk.CTk):
         self.btn_run.pack(pady=20, padx=20, fill="x")
         
         # ============================================================
-        # СТАТУС
-        # ============================================================
-        self.status_label = ctk.CTkLabel(
-            self,
-            text="",
-            font=ctk.CTkFont(size=12)
-        )
-        self.status_label.pack(pady=(0, 15))
-
-        # ============================================================
-        # СТАТУС (нижняя часть)
+        # СТАТУС (нижняя часть) — УВЕЛИЧЕННЫЙ
         # ============================================================
         self.status_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.status_frame.pack(fill="x", padx=20, pady=(0, 15))
 
-        self.status_label = ctk.CTkLabel(
+        self.status_textbox = ctk.CTkTextbox(
             self.status_frame,
-            text="✅ Готов к работе",
+            height=80,
             font=ctk.CTkFont(size=13),
-            text_color="#66BB6A"  # зелёный
+            wrap="word"
         )
-        self.status_label.pack(pady=5)
+        self.status_textbox.pack(fill="x", pady=5)
+        self.status_textbox.insert("0.0", "✅ Готов к работе")
+        self.status_textbox.configure(state="disabled")
 
-    def set_status(self, message, status_type="info"):
+        btn_clear_status = ctk.CTkButton(
+            self.status_frame,
+            text="🗑️ Очистить",
+            command=self.clear_status,
+            width=80,
+            height=28,
+            fg_color="#607D8B",
+            hover_color="#455A64"
+        )
+        btn_clear_status.pack(pady=(0, 5))
+
+    def set_status(self, message, status_type="info", details=None):
         """
         Обновляет статус в нижней части окна
         status_type: "info" (синий), "success" (зелёный), "error" (красный), "warning" (оранжевый)
+        details: дополнительная информация (список файлов и т.д.)
         """
         colors = {
             "info": "#4FC3F7",
@@ -1511,8 +1487,50 @@ class App(ctk.CTk):
         }
         color = colors.get(status_type, "#FFFFFF")
         
-        self.status_label.configure(text=message, text_color=color)
+        # Разрешаем редактирование
+        self.status_textbox.configure(state="normal")
+        self.status_textbox.delete("0.0", "end")
+        
+        # Вставляем основное сообщение с цветом
+        self.status_textbox.insert("0.0", message + "\n", status_type)
+        self.status_textbox.tag_config(status_type, foreground=color)
+        
+        # Если есть детали (список файлов) — добавляем
+        if details:
+            self.status_textbox.insert("end", "\n" + details, "details")
+            self.status_textbox.tag_config("details", foreground="#B0BEC5")  # ← убрали font
+        
+        self.status_textbox.configure(state="disabled")
         self.update()
+    
+    def clear_status(self):
+        """Очищает статус"""
+        self.status_textbox.configure(state="normal")
+        self.status_textbox.delete("0.0", "end")
+        self.status_textbox.insert("0.0", "✅ Готов к работе")
+        self.status_textbox.configure(state="disabled")
+        self.update()
+
+    def show_excluded_files(self, files_with_errors):
+        """Показывает список исключённых файлов в статусе"""
+        if not files_with_errors:
+            return
+        
+        count = len(files_with_errors)
+        
+        # Показываем все файлы, если их не больше 10
+        if count <= 10:
+            files_list = "\n".join([f"  • {fname} — {error}" for fname, error in files_with_errors])
+        else:
+            files_list = "\n".join([f"  • {fname} — {error}" for fname, error in files_with_errors[:10]])
+            files_list += f"\n  ... и ещё {count - 10} файлов"
+        
+        details = f"Исключённые файлы ({count}):\n{files_list}"
+        self.set_status(
+            f"⚠️ {count} файлов исключены (не соответствуют месяцу)",
+            "warning",
+            details
+        )
 
     def refresh_files_list(self):
         """Обновляет список файлов в папке"""
@@ -1521,10 +1539,12 @@ class App(ctk.CTk):
         
         if not folder:
             self.files_listbox.insert("0.0", "⚠️ Папка не выбрана")
+            self.set_status("⚠️ Папка не выбрана", "warning")  # ← вместо status_label
             return
         
         if not os.path.exists(folder):
             self.files_listbox.insert("0.0", "⚠️ Папка не существует")
+            self.set_status("⚠️ Папка не существует", "warning")  # ← вместо status_label
             return
         
         try:
@@ -1533,22 +1553,13 @@ class App(ctk.CTk):
             if graph_files:
                 for f in graph_files:
                     self.files_listbox.insert("end", f + "\n")
-                self.status_label.configure(
-                    text=f"✅ Найдено {len(graph_files)} файлов",
-                    text_color="green"
-                )
+                self.set_status(f"✅ Найдено {len(graph_files)} файлов", "success")  # ← вместо status_label
             else:
                 self.files_listbox.insert("0.0", "⚠️ Нет файлов графиков")
-                self.status_label.configure(
-                    text="⚠️ В папке нет файлов графиков",
-                    text_color="orange"
-                )
+                self.set_status("⚠️ В папке нет файлов графиков", "warning")  # ← вместо status_label
         except Exception as e:
             self.files_listbox.insert("0.0", f"❌ Ошибка: {str(e)}")
-            self.status_label.configure(
-                text=f"❌ Ошибка: {str(e)}",
-                text_color="red"
-            )
+            self.set_status(f"❌ Ошибка: {str(e)}", "error")  # ← вместо status_label
     
     def select_folder(self):
         folder = filedialog.askdirectory(title="Выберите папку с графиками")
@@ -1598,72 +1609,34 @@ class App(ctk.CTk):
             return
         
         self.set_status("⏳ Обработка... Пожалуйста, подождите", "info")
-        
-        # Отключаем кнопку
         self.btn_run.configure(state="disabled", text="⏳ Обработка...")
         self.update()
         
         try:
-            # Перенаправляем вывод в переменную
-            import sys
-            from io import StringIO
+            # ВЫЗЫВАЕМ ФУНКЦИЮ И ПОЛУЧАЕМ ТРИ ЗНАЧЕНИЯ
+            success, files_with_errors, error_message = build_master_schedule(
+                folder, ruk_text, plo_text, month_num, year_num
+            )
             
-            old_stdout = sys.stdout
-            sys.stdout = StringIO()
-            
-            success = build_master_schedule(folder, ruk_text, plo_text, month_num, year_num)
-            
-            # Получаем вывод
-            output = sys.stdout.getvalue()
-            sys.stdout = old_stdout
-            
-            # Анализируем вывод для статуса
             if success:
-                # Ищем сообщение об успехе
-                if "✅" in output or "Готово" in output:
-                    self.set_status("✅ Сводный график успешно создан! Файлы в папке 'Сводный график'", "success")
-                else:
-                    self.set_status("✅ Готово! Файлы сохранены в папке 'Сводный график'", "success")
+                self.set_status("✅ Сводный график успешно создан! Файлы в папке 'Сводный график'", "success")
+                if files_with_errors:
+                    self.show_excluded_files(files_with_errors)
             else:
-                # Ищем причины ошибки
-                if "не найдены" in output or "не найден" in output:
-                    self.set_status("❌ Данные не найдены. Проверьте месяц в файлах", "error")
-                elif "не соответствует" in output:
-                    # Парсим месяц из сообщения
-                    import re
-                    match = re.search(r'месяц в файле.*?(\d+)', output)
-                    if match:
-                        month_in_file = int(match.group(1))
-                        month_name_ru = MONTHS_RU_NOMINATIVE.get(month_in_file, '')
-                        selected_month_name = MONTHS_RU_NOMINATIVE.get(month_num, '')
-                        self.set_status(
-                            f"⚠️ В файлах найден {month_name_ru}, а выбран {selected_month_name}. Проверьте месяц",
-                            "warning"
-                        )
-                    else:
-                        self.set_status("❌ Ошибка: файлы не соответствуют выбранному месяцу", "error")
+                # Если есть явное сообщение об ошибке — показываем его
+                if error_message:
+                    self.set_status(error_message, "error")
+                elif files_with_errors:
+                    self.show_excluded_files(files_with_errors)
                 else:
-                    self.set_status("❌ Ошибка при создании графика. Проверьте консоль", "error")
+                    self.set_status("❌ Ошибка при создании графика", "error")
             
-            # Если есть предупреждения о файлах
-            if "исключены" in output or "исключено" in output:
-                import re
-                match = re.search(r'Всего исключено:\s*(\d+)', output)
-                if match:
-                    count = int(match.group(1))
-                    if count > 0:
-                        self.set_status(
-                            f"⚠️ {count} файлов исключены (не соответствуют месяцу). Проверьте лог",
-                            "warning"
-                        )
-                
         except Exception as e:
             self.set_status(f"❌ Критическая ошибка: {str(e)}", "error")
             import traceback
             print(traceback.format_exc())
         
         finally:
-            # Включаем кнопку
             self.btn_run.configure(state="normal", text="🚀 Составить сводный график")
             self.update()
 
