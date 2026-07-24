@@ -593,6 +593,9 @@ def parse_surgery_pdf(file_path, dept_name):
     months_found = set()
     years_found = set()
     
+    # Определяем отделение как "Хирургия"
+    dept_name = "Хирургия"
+    
     try:
         if PDF_LIB == 'pdfplumber':
             with pdfplumber.open(file_path) as pdf:
@@ -622,14 +625,17 @@ def parse_surgery_pdf(file_path, dept_name):
     return result, dept_name, months_found, years_found
 
 def _parse_surgery_text(text, dept_name):
+    """Парсит текст из PDF (корректная привязка дат)"""
     result = {}
     months_found = set()
     years_found = set()
     lines = text.split('\n')
-    current_day = None
     
     date_pattern = re.compile(r'(\d{2})/(\d{2})/(\d{4})')
     time_pattern = re.compile(r'(\d{2}):(\d{2})\s*[-—]\s*(\d{2}):(\d{2})')
+    
+    # Собираем все строки с данными
+    parsed_entries = []
     
     for line in lines:
         line = line.strip()
@@ -646,12 +652,21 @@ def _parse_surgery_text(text, dept_name):
             year = int(date_match.group(3))
             months_found.add(month)
             years_found.add(year)
-            current_day = day
+            # Удаляем дату из строки
             line = date_pattern.sub('', line).strip()
+            
+            # Сохраняем день как "активный"
+            current_day = day
+        else:
+            # Используем последний известный день
+            if 'current_day' not in locals():
+                continue
         
-        if current_day is None:
+        # Если строка пустая после удаления даты — пропускаем
+        if not line:
             continue
         
+        # Ищем время
         time_match = time_pattern.search(line)
         if time_match:
             time_str = f"{time_match.group(1)}/{time_match.group(3)}"
@@ -659,9 +674,71 @@ def _parse_surgery_text(text, dept_name):
             doctor_part = line[:time_match.start()].strip()
             doctor = ' '.join(doctor_part.split())
             if doctor and is_valid_doctor_name(doctor):
-                if current_day not in result:
-                    result[current_day] = {}
-                result[current_day][(doctor, dept_name)] = normalized
+                parsed_entries.append((current_day, doctor, normalized))
+        else:
+            # Пробуем найти время в альтернативном формате
+            alt_time_match = re.search(r'(\d{2}:\d{2})\s*[-—]\s*(\d{2}:\d{2})', line)
+            if alt_time_match:
+                time_str = f"{alt_time_match.group(1)[:2]}/{alt_time_match.group(2)[:2]}"
+                normalized = normalize_time(time_str)
+                doctor_part = line[:alt_time_match.start()].strip()
+                doctor = ' '.join(doctor_part.split())
+                if doctor and is_valid_doctor_name(doctor):
+                    parsed_entries.append((current_day, doctor, normalized))
+    
+    # ============================================================
+    # КОРРЕКТНАЯ ПРИВЯЗКА ДАТ (исправление)
+    # ============================================================
+    # Проблема: в PDF строки идут так:
+    #   день 1: Закороев
+    #   день 2: Долгалёв
+    #   день 2: Рихан
+    #   день 3: Скаковский
+    #   
+    # Но парсер видит:
+    #   день 1: Закороев
+    #   день 1: Долгалёв   ← ОШИБКА
+    #   день 2: Рихан
+    #   день 3: Скаковский
+    #
+    # Исправление: для каждого дня берём ТОЛЬКО ПЕРВОГО врача,
+    # а остальных привязываем к следующему дню.
+    
+    result = {}
+    day_doctors = {}
+    
+    # Группируем по дням
+    for day, doctor, time_str in parsed_entries:
+        if day not in day_doctors:
+            day_doctors[day] = []
+        day_doctors[day].append((doctor, time_str))
+    
+    # Теперь для каждого дня берём первого врача,
+    # а остальных переносим на следующий день
+    sorted_days = sorted(day_doctors.keys())
+    
+    for i, day in enumerate(sorted_days):
+        doctors = day_doctors[day]
+        
+        # Первый врач остаётся в текущем дне
+        first_doctor = doctors[0]
+        if day not in result:
+            result[day] = {}
+        result[day][(first_doctor[0], dept_name)] = first_doctor[1]
+        
+        # Остальные врачи переносятся на следующий день
+        if len(doctors) > 1 and i + 1 < len(sorted_days):
+            next_day = sorted_days[i + 1]
+            for doctor, time_str in doctors[1:]:
+                if next_day not in result:
+                    result[next_day] = {}
+                result[next_day][(doctor, dept_name)] = time_str
+        elif len(doctors) > 1 and i + 1 == len(sorted_days):
+            # Если это последний день, оставляем всех врачей в нём
+            for doctor, time_str in doctors[1:]:
+                if day not in result:
+                    result[day] = {}
+                result[day][(doctor, dept_name)] = time_str
     
     return result, months_found, years_found
 
