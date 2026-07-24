@@ -1043,8 +1043,11 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
             for i, cell in enumerate(row.cells):
                 cell.width = Inches(2.5)
     
-    doc.save(output_file)
-    print(f"💾 Word сохранён: {output_file}")
+    try:
+        doc.save(output_file)
+        print(f"💾 Word сохранён: {output_file}")
+    except PermissionError:
+        raise PermissionError(f"Файл '{output_file.name}' открыт в Word! Закройте его и повторите попытку.")
 
 # ============================================================
 # ОСНОВНАЯ ФУНКЦИЯ
@@ -1209,20 +1212,29 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     month_lower = MONTHS_RU.get(selected_month, 'августа')
     txt_file = output_folder / f"сводный_график_{month_lower}_{selected_year}.txt"
-    with open(txt_file, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(output_lines))
     
-    print(f"\n💾 TXT сохранён: {txt_file}")
+    # Сохраняем TXT
+    try:
+        with open(txt_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(output_lines))
+        print(f"\n💾 TXT сохранён: {txt_file}")
+    except PermissionError:
+        return False, files_with_errors, f"❌ Файл '{txt_file.name}' открыт в другой программе! Закройте его и повторите попытку."
     
+    # Сохраняем Word
     docx_file = output_folder / f"сводный_график_{month_lower}_{selected_year}.docx"
-    save_to_word(all_data, doctors_by_dept, sorted_depts, docx_file,
-                 rukovoditel_text, ploshadka_text, selected_month, selected_year, month_name)
+    try:
+        save_to_word(all_data, doctors_by_dept, sorted_depts, docx_file,
+                     rukovoditel_text, ploshadka_text, selected_month, selected_year, month_name)
+        print(f"💾 Word сохранён: {docx_file}")
+    except PermissionError:
+        return False, files_with_errors, f"❌ Файл '{docx_file.name}' открыт в Word! Закройте его и повторите попытку."
     
     print(f"\n✅ Готово!")
     print(f"   📄 TXT: {txt_file}")
     print(f"   📝 Word: {docx_file}")
     
-    return True, files_with_errors, ""  # ← ВОЗВРАЩАЕМ 3 ЗНАЧЕНИЯ
+    return True, files_with_errors, ""
 # ============================================================
 # ГЛАВНОЕ ПРИЛОЖЕНИЕ (CustomTkinter)
 # ============================================================
@@ -1232,16 +1244,28 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         
-        # Устанавливаем иконку для окна
+        # ============================================================
+        # УСТАНОВКА ИКОНКИ
+        # ============================================================
         try:
+            # Путь к иконке
             icon_path = os.path.join(get_base_path(), "icon.ico")
             if os.path.exists(icon_path):
                 # Для окна
                 self.iconbitmap(icon_path)
                 # Для панели задач (Windows)
-                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("myappid")
-        except:
-            pass
+                try:
+                    import ctypes
+                    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SvodnyGrafik")
+                except:
+                    pass
+                print(f"✅ Иконка загружена: {icon_path}")
+            else:
+                print(f"⚠️ Иконка не найдена: {icon_path}")
+        except Exception as e:
+            print(f"⚠️ Ошибка установки иконки: {e}")
+        
+        # ... остальной код __init__ ...
         
         # ... остальной код ...
         
