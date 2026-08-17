@@ -13,6 +13,8 @@ import datetime
 import os
 import calendar
 import sys
+import tkinter as tk
+from tkinter import messagebox
 
 # ============================================================
 # НАСТРОЙКА CustomTkinter
@@ -177,11 +179,18 @@ def get_dept_abbr(dept_name):
         'Приемное отделение': 'ПО',
         'ОАР': 'ОАР',
         'Хирургия': 'ХИР',
+        'Гнойная хирургия': 'ГН ХИР',
         'Гинекология': 'ГИН',
         'Урология': 'УРО',
         'Травматология': 'ТРАВМ',
         'Травмпункт': 'ТР П',
-    }
+        'Лаборатория ОАР': 'ЛАБ',
+        'Лаборотория ОАР': 'ЛАБ',   # с опечаткой
+        'Неврология ОНМК': 'НЕВР',
+        'Рентген': 'РЕНТ',
+        'МХГ': 'МХГ',
+        'Терапевты': 'ТЕР',
+    }        
     
     if dept_name in DEPT_ABBR:
         return DEPT_ABBR[dept_name]
@@ -201,10 +210,16 @@ def get_dept_order(dept_name):
         'Приемное отделение',
         'ОАР',
         'Хирургия',
+        'Гнойная хирургия',
         'Гинекология',
         'Урология',
         'Травматология',
         'Травмпункт',
+        'Лаборатория ОАР',
+        'Рентген',
+        'Неврология ОНМК',
+        'Терапевты',
+        'МХГ',
     ]
     for i, dept in enumerate(DEPARTMENT_ORDER):
         if dept.lower() in dept_name.lower() or dept_name.lower() in dept.lower():
@@ -274,19 +289,25 @@ def is_valid_doctor_name(name):
     if not name:
         return False
     
+    # ============================================================
+    # ПРОВЕРКА НА ЗАГОЛОВКИ
+    # ============================================================
     headers = ['Дата', 'Дежурный врач', 'Сб', 'Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт',
                'График', 'Утверждаю', 'Заведующий', 'Ф.И.О.', 'цех', 'отделение',
-               '2026', '2025', 'Август', 'Март']
+               '2026', '2025', 'Август', 'Март', 'ФИО', '№', 'п/п', 'Код']
     for h in headers:
         if h in name:
             return False
     
+    # Исключаем строки с датами
     if re.search(r'\d{4}-\d{2}-\d{2}', name):
         return False
     
+    # Имя врача должно содержать буквы и быть не слишком длинным
     if len(name) > 50:
         return False
     
+    # Должна быть хотя бы одна русская буква
     if not re.search(r'[а-яА-ЯёЁ]', name):
         return False
     
@@ -296,7 +317,29 @@ def is_valid_doctor_name(name):
 # ПАРСЕРЫ
 # ============================================================
 def detect_department(df, file_path):
+    """Определяет отделение по содержимому файла"""
     file_stem = Path(file_path).stem.lower()
+    
+    # Для многостраничного Excel (Володарского) — определяем по имени файла
+    if 'график дежурств 2026' in file_stem or 'график дежурств' in file_stem:
+        # Проверяем первые строки на наличие ключевых слов отделений
+        for i in range(min(20, len(df))):
+            row = df.iloc[i].values
+            row_str = ' '.join(str(v) for v in row if pd.notna(v))
+            for keyword, dept in {
+                'ОАР': 'ОАР',
+                'Хирургия': 'Хирургия',
+                'Приемное': 'Приемное отделение',
+                'Гинекология': 'Гинекология',
+                'Травматология': 'Травматология',
+                'Неврология': 'Неврология ОНМК',
+                'Терапевты': 'Терапевты',
+            }.items():
+                if keyword in row_str:
+                    return dept
+        return 'Володарского (сводный)'
+    
+    # ... остальной код для стандартного формата
     
     header_text = ''
     for i in range(min(10, len(df))):
@@ -734,6 +777,173 @@ def parse_surgery_txt(file_path, dept_name):
     print(f"   📅 Найдено {len(result)} дней с дежурствами, месяц: {months}, год: {years}")
     return result, dept_name, months, years
 
+def parse_excel_with_months(file_path, selected_month, selected_year):
+    """
+    Парсит Excel-файл, где:
+    - Листы названы по месяцам
+    - На каждом листе — таблицы всех отделений
+    """
+    print(f"\n   🔍 Парсим {Path(file_path).name} (многостраничный Excel)...")
+    
+    month_names = {
+        'январь': 1, 'февраль': 2, 'март': 3, 'апрель': 4,
+        'май': 5, 'июнь': 6, 'июль': 7, 'август': 8,
+        'сентябрь': 9, 'октябрь': 10, 'ноябрь': 11, 'декабрь': 12
+    }
+    month_names_reverse = {v: k for k, v in month_names.items()}
+    
+    month_name_ru = month_names_reverse.get(selected_month, '')
+    if not month_name_ru:
+        print(f"   ⚠️ Неизвестный месяц: {selected_month}")
+        return {}, None, None
+    
+    try:
+        xl = pd.ExcelFile(file_path)
+        sheet_names = [s.lower() for s in xl.sheet_names]
+        
+        if month_name_ru not in sheet_names:
+            print(f"   ⚠️ Лист '{month_name_ru}' не найден в файле")
+            return {}, None, None
+        
+        df = pd.read_excel(file_path, sheet_name=month_name_ru, header=None)
+        print(f"   📄 Читаем лист: {month_name_ru}")
+    except Exception as e:
+        print(f"   ⚠️ Ошибка чтения Excel: {e}")
+        return {}, None, None
+    
+    dept_keywords = {
+    'Лаборотория ОАР': 'Лаборатория ОАР',      # ← с опечаткой (СНАЧАЛА!)
+    'Лаборатория ОАР': 'Лаборатория ОАР',       # ← правильное написание
+    'ОАР': 'ОАР',
+    'Хирургия': 'Хирургия',
+    'Гнойная хирургия': 'Гнойная хирургия',
+    'Приемное отделение': 'Приемное отделение',
+    'МХГ': 'МХГ',
+    'Гинекология': 'Гинекология',
+    'Травматология': 'Травматология',
+    'Рентген': 'Рентген',
+    'Неврология ОНМК': 'Неврология ОНМК',
+    'Терапевты': 'Терапевты',
+}
+    
+    result = {}
+    months_found = {selected_month}
+    years_found = {selected_year}
+    doctors_found = 0
+    
+    # Добавляем известных врачей, которые могут быть не распознаны
+    KNOWN_DOCTORS = ['Кодиров', 'Кодиров ИМ', 'Кодиров И.М.']
+    
+    i = 0
+    while i < len(df):
+        row = df.iloc[i].values
+        row_str = ' '.join(str(v) for v in row if pd.notna(v))
+        
+        dept_name = None
+        for keyword, dept in dept_keywords.items():
+            if keyword in row_str:
+                dept_name = dept
+                break
+        
+        if dept_name:
+            print(f"   🏥 Найдено отделение: {dept_name}")
+            i += 1
+            
+            if i < len(df):
+                row = df.iloc[i].values
+                row_str = ' '.join(str(v) for v in row if pd.notna(v))
+                if any(day in row_str for day in ['Сб', 'Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт']):
+                    i += 1
+            
+            while i < len(df):
+                row = df.iloc[i].values
+                if len(row) == 0 or pd.isna(row[0]):
+                    i += 1
+                    continue
+                
+                first_cell = str(row[0]).strip()
+                
+                row_str_full = ' '.join(str(v) for v in row if pd.notna(v))
+                if any(keyword in row_str_full for keyword in dept_keywords.keys()):
+                    break
+                
+                if not first_cell:
+                    i += 1
+                    continue
+                
+                if 'ФИО' in first_cell:
+                    i += 1
+                    continue
+                
+                if 'отпуск' in first_cell.lower() or 'отп' in first_cell.lower():
+                    i += 1
+                    continue
+                
+                if first_cell in ['х', 'Х', 'о', 'О']:
+                    i += 1
+                    continue
+                
+                # ============================================================
+                # ПРОВЕРЯЕМ, ЯВЛЯЕТСЯ ЛИ СТРОКА ИМЕНЕМ ВРАЧА
+                # ============================================================
+                is_doctor = is_valid_doctor_name(first_cell)
+                
+                # Дополнительная проверка для известных врачей
+                if not is_doctor:
+                    for kd in KNOWN_DOCTORS:
+                        if kd in first_cell:
+                            is_doctor = True
+                            print(f"   🔍 Известный врач найден по ключевому слову: {first_cell}")
+                            break
+                
+                if is_doctor:
+                    doctor = first_cell
+                    doctors_found += 1
+                    
+                    # Отладочный вывод для Кодирова
+                    if 'Кодиров' in doctor:
+                        print(f"   🔍 Обрабатываем Кодирова: {doctor}")
+                    
+                    for col_idx in range(1, len(row)):
+                        if pd.notna(row[col_idx]):
+                            val = str(row[col_idx]).strip()
+                            if val and val not in ['', 'nan', 'None', 'х', 'Х', 'о', 'О']:
+                                # ============================================================
+                                # НОРМАЛИЗУЕМ ВРЕМЯ (с поддержкой букв А/Р/Э)
+                                # ============================================================
+                                letter_match = re.search(r'([АРЭ])$', val)
+                                if letter_match:
+                                    letter = letter_match.group(1)
+                                    time_part = val[:letter_match.start()].strip()
+                                    time_part = re.sub(r'/$', '', time_part).strip()
+                                    normalized = normalize_time(time_part)
+                                    if normalized and normalized != '00-00':
+                                        day_num = col_idx
+                                        if day_num not in result:
+                                            result[day_num] = {}
+                                        result[day_num][(doctor, dept_name)] = f"{normalized}{letter}"
+                                        
+                                        # Отладка для Кодирова
+                                        if 'Кодиров' in doctor:
+                                            print(f"   🔍 Кодиров: день {day_num}, время {normalized}{letter} (было '{val}')")
+                                else:
+                                    normalized = normalize_time(val)
+                                    if normalized and normalized != '00-00':
+                                        day_num = col_idx
+                                        if day_num not in result:
+                                            result[day_num] = {}
+                                        result[day_num][(doctor, dept_name)] = normalized
+                                        
+                                        # Отладка для Кодирова
+                                        if 'Кодиров' in doctor:
+                                            print(f"   🔍 Кодиров: день {day_num}, время {normalized} (было '{val}')")
+                i += 1
+            continue
+        i += 1
+    
+    print(f"   👨‍⚕️ Найдено {doctors_found} врачей")
+    
+    return result, months_found, years_found
 # ============================================================
 # СОХРАНЕНИЕ В WORD
 # ============================================================
@@ -1057,7 +1267,7 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
 # ============================================================
 def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text, 
                           selected_month, selected_year):
-    """Собирает сводный график из файлов в папке"""
+    """Собирает сводный график из файлов в папке (поддерживает оба формата)"""
     print(f"\n📊 Начинаем сборку сводного графика...")
     print(f"📁 Папка: {input_folder}")
     print(f"📅 Месяц: {selected_month}, Год: {selected_year}")
@@ -1065,9 +1275,11 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     folder = Path(input_folder)
     
+    # Создаём папку для результата
     output_folder = folder / "Сводный график"
     output_folder.mkdir(exist_ok=True)
     
+    # Ищем все файлы
     all_files = []
     for ext in ['*.xlsx', '*.xls', '*.csv', '*.pdf', '*.txt']:
         all_files.extend(folder.glob(ext))
@@ -1090,10 +1302,63 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     dept_order_map = {}
     files_with_errors = []
     
+    # ============================================================
+    # СЛОВАРЬ МЕСЯЦЕВ ДЛЯ ПРОВЕРКИ
+    # ============================================================
+    month_names_ru = {
+        1: 'январь', 2: 'февраль', 3: 'март', 4: 'апрель',
+        5: 'май', 6: 'июнь', 7: 'июль', 8: 'август',
+        9: 'сентябрь', 10: 'октябрь', 11: 'ноябрь', 12: 'декабрь'
+    }
+    
     for file_path in all_files:
         print(f"\n{'='*60}")
         print(f"📂 Обрабатываем: {file_path.name}")
         
+        # ============================================================
+        # ПРОВЕРКА: Многостраничный Excel (Володарского)
+        # ============================================================
+        is_multisheet = False
+        try:
+            if file_path.suffix.lower() in ['.xlsx', '.xls']:
+                xl = pd.ExcelFile(file_path)
+                sheet_names = [s.lower() for s in xl.sheet_names]
+                month_names = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 
+                               'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
+                if any(s in sheet_names for s in month_names):
+                    is_multisheet = True
+        except:
+            pass
+        
+        if is_multisheet:
+            print(f"   📚 Определён как многостраничный Excel (Володарского)")
+            data, months, years = parse_excel_with_months(file_path, selected_month, selected_year)
+            
+            if data:
+                # Добавляем данные
+                for day, doctors in data.items():
+                    if day not in all_data:
+                        all_data[day] = {}
+                    all_data[day].update(doctors)
+                    
+                    # Добавляем врачей в отделения
+                    for doctor_key in doctors.keys():
+                        dept_name = doctor_key[1]
+                        if dept_name not in doctors_by_dept:
+                            doctors_by_dept[dept_name] = []
+                        if doctor_key not in doctors_by_dept[dept_name]:
+                            doctors_by_dept[dept_name].append(doctor_key)
+                        dept_order_map[dept_name] = get_dept_order(dept_name)
+                
+                print(f"   ✅ Обработано {len(data)} дней, {len(doctors_by_dept)} отделений")
+                continue
+            else:
+                print(f"   ⚠️ Не удалось распарсить многостраничный Excel, пробуем стандартный парсер")
+        
+        # ============================================================
+        # СТАНДАРТНЫЙ ПАРСЕР (Ломоносова)
+        # ============================================================
+        # Читаем файл для определения отделения
         df_temp = read_excel_or_csv(file_path)
         if df_temp is not None:
             dept_name = detect_department(df_temp, file_path)
@@ -1103,6 +1368,7 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         print(f"   🏥 Отделение: {dept_name}")
         print(f"   📛 Сокращение: {get_dept_abbr(dept_name)}")
         
+        # Выбираем парсер
         if dept_name == 'ОАР' or 'ОАР' in file_path.name:
             data, detected_dept, months, years = parse_oar_graph(file_path, dept_name)
             if detected_dept and detected_dept != dept_name:
@@ -1129,6 +1395,7 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
             print(f"   ⚠️ Данные не найдены для {dept_name}")
             continue
         
+        # Проверяем месяц и год
         if months:
             if selected_month not in months:
                 print(f"   ⚠️ Месяц в файле ({months}) не соответствует выбранному ({selected_month})")
@@ -1156,11 +1423,39 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         
         print(f"   ✅ Обработано {len(data)} дней, {len(doctors_by_dept.get(dept_name, []))} врачей")
     
+    # ============================================================
+    # ПРОВЕРКА РЕЗУЛЬТАТОВ
+    # ============================================================
     if not all_data:
         print("❌ Данные не найдены ни в одном файле!")
         month_name_ru = MONTHS_RU_NOMINATIVE.get(selected_month, '')
-        return False, files_with_errors, f"❌ Данные за {month_name_ru} {selected_year} не найдены! Проверьте месяц в файлах"
+        
+        # Формируем понятное сообщение
+        if files_with_errors:
+            msg = f"Данные за {month_name_ru} {selected_year} года не найдены ни в одном из графиков.\n\n"
+            msg += "Проверьте, что в файлах указан правильный месяц и год.\n\n"
+            msg += "Исключённые файлы:\n"
+            for fname, error in files_with_errors[:5]:
+                msg += f"  • {fname}\n"
+            if len(files_with_errors) > 5:
+                msg += f"  ... и ещё {len(files_with_errors) - 5} файлов"
+        else:
+            msg = f"Данные за {month_name_ru} {selected_year} года не найдены.\n\n"
+            msg += "Возможно, в папке нет файлов графиков за выбранный период.\n"
+            msg += "Проверьте выбранную папку и месяц."
+        
+        try:
+            root = tk._default_root
+            if root:
+                messagebox.showerror("Данные не найдены", msg)
+        except:
+            pass
+        
+        return False, files_with_errors, msg
     
+    # ============================================================
+    # ВЫВОД ИСКЛЮЧЁННЫХ ФАЙЛОВ
+    # ============================================================
     if files_with_errors:
         print("\n" + "=" * 60)
         print("⚠️⚠️⚠️ Файлы, исключённые из сводного графика (не соответствуют выбранному месяцу/году):")
@@ -1171,7 +1466,23 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         print("-" * 60)
         print(f"   Всего исключено: {len(files_with_errors)} файлов")
         print("=" * 60)
+        
+        try:
+            root = tk._default_root
+            if root and all_data:
+                msg = "Следующие файлы не соответствуют выбранному месяцу/году и были исключены:\n\n"
+                for fname, error in files_with_errors[:5]:
+                    msg += f"• {fname}\n  ({error})\n"
+                if len(files_with_errors) > 5:
+                    msg += f"\n... и ещё {len(files_with_errors) - 5} файлов"
+                msg += f"\n\nВсего исключено: {len(files_with_errors)} файлов"
+                messagebox.showwarning("Файлы исключены", msg)
+        except:
+            pass
     
+    # ============================================================
+    # СОРТИРОВКА ОТДЕЛЕНИЙ
+    # ============================================================
     sorted_depts = sorted(
         doctors_by_dept.keys(),
         key=lambda d: (dept_order_map.get(d, 999), d)
@@ -1186,6 +1497,9 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     month_name = MONTHS_RU_UPPER.get(selected_month, 'АВГУСТ')
     
+    # ============================================================
+    # СОХРАНЕНИЕ TXT
+    # ============================================================
     _, last_day = calendar.monthrange(selected_year, selected_month)
     weekday_names = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
     weekdays = []
@@ -1212,16 +1526,14 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     
     month_lower = MONTHS_RU.get(selected_month, 'августа')
     txt_file = output_folder / f"сводный_график_{month_lower}_{selected_year}.txt"
+    with open(txt_file, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(output_lines))
     
-    # Сохраняем TXT
-    try:
-        with open(txt_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(output_lines))
-        print(f"\n💾 TXT сохранён: {txt_file}")
-    except PermissionError:
-        return False, files_with_errors, f"❌ Файл '{txt_file.name}' открыт в другой программе! Закройте его и повторите попытку."
+    print(f"\n💾 TXT сохранён: {txt_file}")
     
-    # Сохраняем Word
+    # ============================================================
+    # СОХРАНЕНИЕ WORD
+    # ============================================================
     docx_file = output_folder / f"сводный_график_{month_lower}_{selected_year}.docx"
     try:
         save_to_word(all_data, doctors_by_dept, sorted_depts, docx_file,
