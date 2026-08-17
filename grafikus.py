@@ -1323,13 +1323,20 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         # ПРОВЕРКА: Многостраничный Excel (Володарского)
         # ============================================================
         is_multisheet = False
+        is_oar_file = False
+        
+        # Проверяем, не является ли файл отдельным ОАР
+        if 'ОАР' in file_path.name or 'оар' in file_path.name.lower():
+            is_oar_file = True
+        
         try:
             if file_path.suffix.lower() in ['.xlsx', '.xls']:
                 xl = pd.ExcelFile(file_path)
                 sheet_names = [s.lower() for s in xl.sheet_names]
                 month_names = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 
                                'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
-                if any(s in sheet_names for s in month_names):
+                # Если в файле есть листы с названиями месяцев И это не ОАР-файл
+                if any(s in sheet_names for s in month_names) and not is_oar_file:
                     is_multisheet = True
         except:
             pass
