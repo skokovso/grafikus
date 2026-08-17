@@ -120,6 +120,12 @@ def normalize_time(time_str):
     
     time_str = time_str.strip()
     
+    # Обработка формата "9\8" или "10\8" (Кодиров ИМ)
+    match = re.match(r'(\d{1,2})\s*[\\/]\s*(\d{1,2})', time_str)
+    if match:
+        h1, h2 = match.groups()
+        return f"{int(h1):02d}-{int(h2):02d}"
+    
     match = re.match(r'(\d{1,2}):(\d{2})\s*[-—]\s*(\d{1,2}):(\d{2})', time_str)
     if match:
         h1, m1, h2, m2 = match.groups()
@@ -944,6 +950,7 @@ def parse_excel_with_months(file_path, selected_month, selected_year):
     print(f"   👨‍⚕️ Найдено {doctors_found} врачей")
     
     return result, months_found, years_found
+
 # ============================================================
 # СОХРАНЕНИЕ В WORD
 # ============================================================
@@ -1262,9 +1269,6 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
 # ============================================================
 # ОСНОВНАЯ ФУНКЦИЯ
 # ============================================================
-# ============================================================
-# ОСНОВНАЯ ФУНКЦИЯ
-# ============================================================
 def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text, 
                           selected_month, selected_year):
     """Собирает сводный график из файлов в папке (поддерживает оба формата)"""
@@ -1547,6 +1551,7 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
     print(f"   📝 Word: {docx_file}")
     
     return True, files_with_errors, ""
+
 # ============================================================
 # ГЛАВНОЕ ПРИЛОЖЕНИЕ (CustomTkinter)
 # ============================================================
@@ -1577,10 +1582,6 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"⚠️ Ошибка установки иконки: {e}")
         
-        # ... остальной код __init__ ...
-        
-        # ... остальной код ...
-        
         self.title("Сводный график дежурств")
         self.geometry("700x750")
         self.minsize(650, 700)
@@ -1591,6 +1592,7 @@ class App(ctk.CTk):
         self.ploshadka = ctk.StringVar()
         self.month_var = ctk.StringVar()
         self.year_var = ctk.StringVar()
+        self.last_success_message = ""
         
         # Загружаем справочники
         self.rukovoditeli_list = load_spravochnik('spravochnik_rukovoditeli.txt')
@@ -1797,6 +1799,11 @@ class App(ctk.CTk):
         self.status_textbox.pack(fill="x", pady=5)
         self.status_textbox.insert("0.0", "✅ Готов к работе")
         self.status_textbox.configure(state="disabled")
+        
+        # ============================================================
+        # КЛИК ПО СТАТУСУ ОТКРЫВАЕТ ПАПКУ
+        # ============================================================
+        self.status_textbox.bind("<Button-1>", self.on_status_click)
 
         btn_clear_status = ctk.CTkButton(
             self.status_frame,
@@ -1834,9 +1841,19 @@ class App(ctk.CTk):
         # Если есть детали (список файлов) — добавляем
         if details:
             self.status_textbox.insert("end", "\n" + details, "details")
-            self.status_textbox.tag_config("details", foreground="#B0BEC5")  # ← убрали font
+            self.status_textbox.tag_config("details", foreground="#B0BEC5")
         
         self.status_textbox.configure(state="disabled")
+        
+        # ============================================================
+        # ЗАПОМИНАЕМ УСПЕШНЫЙ СТАТУС ДЛЯ КЛИКА
+        # ============================================================
+        if status_type == "success" and "Сводный график успешно создан" in message:
+            self.last_success_message = message
+            self.status_textbox.configure(cursor="hand2")
+        else:
+            self.status_textbox.configure(cursor="arrow")
+        
         self.update()
     
     def clear_status(self):
@@ -1845,6 +1862,8 @@ class App(ctk.CTk):
         self.status_textbox.delete("0.0", "end")
         self.status_textbox.insert("0.0", "✅ Готов к работе")
         self.status_textbox.configure(state="disabled")
+        self.status_textbox.configure(cursor="arrow")
+        self.last_success_message = ""
         self.update()
 
     def show_excluded_files(self, files_with_errors):
@@ -1875,12 +1894,12 @@ class App(ctk.CTk):
         
         if not folder:
             self.files_listbox.insert("0.0", "⚠️ Папка не выбрана")
-            self.set_status("⚠️ Папка не выбрана", "warning")  # ← вместо status_label
+            self.set_status("⚠️ Папка не выбрана", "warning")
             return
         
         if not os.path.exists(folder):
             self.files_listbox.insert("0.0", "⚠️ Папка не существует")
-            self.set_status("⚠️ Папка не существует", "warning")  # ← вместо status_label
+            self.set_status("⚠️ Папка не существует", "warning")
             return
         
         try:
@@ -1889,19 +1908,54 @@ class App(ctk.CTk):
             if graph_files:
                 for f in graph_files:
                     self.files_listbox.insert("end", f + "\n")
-                self.set_status(f"✅ Найдено {len(graph_files)} файлов", "success")  # ← вместо status_label
+                self.set_status(f"✅ Найдено {len(graph_files)} файлов", "success")
             else:
                 self.files_listbox.insert("0.0", "⚠️ Нет файлов графиков")
-                self.set_status("⚠️ В папке нет файлов графиков", "warning")  # ← вместо status_label
+                self.set_status("⚠️ В папке нет файлов графиков", "warning")
         except Exception as e:
             self.files_listbox.insert("0.0", f"❌ Ошибка: {str(e)}")
-            self.set_status(f"❌ Ошибка: {str(e)}", "error")  # ← вместо status_label
+            self.set_status(f"❌ Ошибка: {str(e)}", "error")
     
     def select_folder(self):
         folder = filedialog.askdirectory(title="Выберите папку с графиками")
         if folder:
             self.folder_path.set(folder)
             self.refresh_files_list()
+
+    def on_status_click(self, event):
+        """Обработчик клика по статусной строке"""
+        text = self.status_textbox.get("0.0", "end").strip()
+        
+        if "✅ Сводный график успешно создан" in text:
+            self.open_output_folder()
+        elif "❌ Файл" in text and "открыт в Word" in text:
+            messagebox.showinfo("Подсказка", "Закройте файл в Word и повторите попытку.")
+        else:
+            # Пробуем открыть папку, если есть результат
+            folder = self.folder_path.get().strip()
+            if folder:
+                output_folder = Path(folder) / "Сводный график"
+                if output_folder.exists():
+                    self.open_output_folder()
+
+    def open_output_folder(self, folder_path=None):
+        """Открывает папку с результатами"""
+        if folder_path is None:
+            folder_path = self.folder_path.get().strip()
+        
+        if not folder_path:
+            return
+        
+        output_folder = Path(folder_path) / "Сводный график"
+        if not output_folder.exists():
+            self.set_status("⚠️ Папка 'Сводный график' не найдена", "warning")
+            return
+        
+        try:
+            os.startfile(str(output_folder))
+            self.set_status(f"📂 Открыта папка: {output_folder.name}", "info")
+        except Exception as e:
+            self.set_status(f"❌ Ошибка открытия папки: {str(e)}", "error")
     
     def run(self):
         folder = self.folder_path.get().strip()
