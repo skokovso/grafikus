@@ -1,0 +1,6 @@
+pandas
+openpyxl
+python-docx
+customtkinter
+pdfplumber
+pypdf
