@@ -4,6 +4,7 @@ import calendar
 import datetime
 from pathlib import Path
 from core.config import MONTHS_RU, DEPT_ABBR
+from core.utils import normalize_doctor_name_for_output, round_time_up_for_output
 
 def get_dept_abbr_from_name(dept_name: str) -> str:
     if dept_name in DEPT_ABBR:
@@ -30,27 +31,35 @@ def save_to_txt(all_data, doctors_by_dept, sorted_depts, output_file, month_num,
             for dept in sorted_depts:
                 dept_doctors = sorted(doctors_by_dept.get(dept, []), key=lambda x: x[0])
                 abbr = get_dept_abbr_from_name(dept)
+                is_travma_zav = (dept == 'Травматология (зав.)')
+
                 for doctor, dept_key in dept_doctors:
                     if (doctor, dept_key) in all_data[day]:
                         value = all_data[day][(doctor, dept_key)]
+
+                        # Нормализация ФИО для травматологии заведующего
+                        out_doctor = normalize_doctor_name_for_output(doctor) if is_travma_zav else doctor
+
                         # Администрация выводится без времени
                         if dept == 'АДМ' or dept_key == 'АДМ':
-                            line_text = f"* {doctor} ({abbr})"
-                            output_lines.append(line_text)
+                            output_lines.append(f"* {out_doctor} ({abbr})")
                             continue
+
                         # Парсим значение: если начинается с А/Р/Э — буква после скобки
                         letter = ''
                         time_part = value
                         if value and value[0] in 'АРЭ':
                             letter = value[0]
                             time_part = value[1:]
+
+                        # Округление времени для травматологии заведующего
+                        if is_travma_zav:
+                            time_part = round_time_up_for_output(time_part)
+
                         if letter:
-                            line_text = f"  {doctor} ({abbr}){letter} {time_part}"
+                            output_lines.append(f"  {out_doctor} ({abbr}){letter} {time_part}")
                         else:
-                            line_text = f"  {doctor} ({abbr}) {time_part}"
-                        output_lines.append(line_text)
-                            
-                        output_lines.append(line_text)
+                            output_lines.append(f"  {out_doctor} ({abbr}) {time_part}")
             output_lines.append("")
 
     try:

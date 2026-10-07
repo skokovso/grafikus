@@ -15,6 +15,8 @@ from parsers.multisheet import parse_excel_with_months
 from output.word_builder import save_to_word
 from output.txt_builder import save_to_txt
 from parsers.administration import parse_administration_graph
+from parsers.travmatology import parse_travmatology_graph   # добавить в импорты
+
 
 def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
                           selected_month, selected_year):
@@ -102,19 +104,32 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         if 'администрация' in file_path.name.lower():
             # Передаем выбранную площадку для фильтрации!
             data, detected_dept, months, years = parse_administration_graph(file_path, ploshadka_text)
-        elif dept_name == 'ОАР' or 'ОАР' in file_path.name:
-            data, detected_dept, months, years = parse_oar_graph(file_path, dept_name)
-        elif dept_name == 'Ответственные по стационару' or 'ответственн' in dept_name.lower() or 'Ответственные' in file_path.name:
-            data, detected_dept, months, years = parse_responsible_graph(file_path, dept_name)
-        elif file_path.suffix.lower() == '.pdf':
-            data, detected_dept, months, years = parse_surgery_pdf(file_path, dept_name)
-        elif file_path.suffix.lower() == '.txt':
-            data, detected_dept, months, years = parse_surgery_txt(file_path, dept_name)
-            if not data:
-                print(f"   ⚠️ Не удалось прочитать TXT, пропускаем")
-                continue
+            dept_name = detected_dept or 'АДМ'
         else:
-            data, detected_dept, months, years = parse_standard_graph(file_path, dept_name)
+            # Формат заведующего травматологии: файл без префикса "Графики_",
+            # но содержит "травматолог" (в т.ч. опечатка "траваматолог")
+            fname_lower = file_path.name.lower()
+            is_travma_alt = (
+                ('травматолог' in fname_lower or 'траваматолог' in fname_lower)
+                and not fname_lower.startswith('графики_')
+            )
+
+            if is_travma_alt:
+                data, detected_dept, months, years = parse_travmatology_graph(file_path)
+                dept_name = detected_dept
+            elif dept_name == 'ОАР' or 'ОАР' in file_path.name:
+                data, detected_dept, months, years = parse_oar_graph(file_path, dept_name)
+            elif dept_name == 'Ответственные по стационару' or 'ответственн' in dept_name.lower() or 'Ответственные' in file_path.name:
+                data, detected_dept, months, years = parse_responsible_graph(file_path, dept_name)
+            elif file_path.suffix.lower() == '.pdf':
+                data, detected_dept, months, years = parse_surgery_pdf(file_path, dept_name)
+            elif file_path.suffix.lower() == '.txt':
+                data, detected_dept, months, years = parse_surgery_txt(file_path, dept_name)
+                if not data:
+                    print(f"   ⚠️ Не удалось прочитать TXT, пропускаем")
+                    continue
+            else:
+                data, detected_dept, months, years = parse_standard_graph(file_path, dept_name)
 
         if detected_dept and detected_dept != dept_name:
             dept_name = detected_dept

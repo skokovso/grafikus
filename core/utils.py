@@ -104,3 +104,57 @@ def read_excel_or_csv(file_path: str | Path) -> pd.DataFrame | None:
                 continue
         return None
     return None
+
+def normalize_doctor_name_for_output(name: str) -> str:
+    """'Шаповалов АВ' → 'Шаповалов А.В.' (только для вывода).
+
+    Если инициалы уже с точками — не трогаем.
+    """
+    if not name:
+        return name
+    parts = name.strip().rsplit(' ', 1)
+    if len(parts) != 2:
+        return name
+    surname, initials = parts
+    if '.' in initials:
+        return name
+    if len(initials) <= 3 and initials.isalpha():
+        dotted = '.'.join(initials) + '.'
+        return f"{surname} {dotted}"
+    return name
+
+
+def _round_hour_up(h: int, m: int = 0) -> int:
+    """Если есть минуты (m > 0) — округляем час вверх. 8:30 → 9. 8:00 → 8."""
+    if m > 0:
+        h += 1
+    return h % 24
+
+
+def round_time_up_for_output(value: str) -> str:
+    """Округляет время вверх до целого часа.
+
+    '08:30-16:30' → '09-17'
+    '16:30-08:30' → '17-09'
+    '08:30-08:30' → '09-09'
+    '09-18'       → '09-18'
+    '09:00-18:00' → '09-18'
+    """
+    if not value:
+        return value
+
+    # Формат ЧЧ:ММ-ЧЧ:ММ (и ЧЧ.ММ-ЧЧ.ММ)
+    m = re.match(r'^\s*(\d{1,2})[:.](\d{2})\s*[-—]\s*(\d{1,2})[:.](\d{2})\s*$', value)
+    if m:
+        h1, m1, h2, m2 = m.groups()
+        h1 = _round_hour_up(int(h1), int(m1))
+        h2 = _round_hour_up(int(h2), int(m2))
+        return f"{h1:02d}-{h2:02d}"
+
+    # Формат ЧЧ-ЧЧ
+    m = re.match(r'^\s*(\d{1,2})\s*[-—]\s*(\d{1,2})\s*$', value)
+    if m:
+        h1, h2 = m.groups()
+        return f"{_round_hour_up(int(h1)):02d}-{_round_hour_up(int(h2)):02d}"
+
+    return value
