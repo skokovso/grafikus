@@ -33,6 +33,11 @@ def save_to_txt(all_data, doctors_by_dept, sorted_depts, output_file, month_num,
                 for doctor, dept_key in dept_doctors:
                     if (doctor, dept_key) in all_data[day]:
                         value = all_data[day][(doctor, dept_key)]
+                        # Администрация выводится без времени
+                        if dept == 'АДМ' or dept_key == 'АДМ':
+                            line_text = f"* {doctor} ({abbr})"
+                            output_lines.append(line_text)
+                            continue
                         # Парсим значение: если начинается с А/Р/Э — буква после скобки
                         letter = ''
                         time_part = value
@@ -40,9 +45,12 @@ def save_to_txt(all_data, doctors_by_dept, sorted_depts, output_file, month_num,
                             letter = value[0]
                             time_part = value[1:]
                         if letter:
-                            output_lines.append(f"  {doctor} ({abbr}){letter} {time_part}")
+                            line_text = f"  {doctor} ({abbr}){letter} {time_part}"
                         else:
-                            output_lines.append(f"  {doctor} ({abbr}) {time_part}")
+                            line_text = f"  {doctor} ({abbr}) {time_part}"
+                        output_lines.append(line_text)
+                            
+                        output_lines.append(line_text)
             output_lines.append("")
 
     try:

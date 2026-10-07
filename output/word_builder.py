@@ -134,13 +134,16 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
                 for doctor, dept_key in dept_doctors:
                     if (doctor, dept_key) in all_data[day]:
                         value = all_data[day][(doctor, dept_key)]
+                        # Администрация — без времени
+                        if dept == 'АДМ' or dept_key == 'АДМ':
+                            block_lines.append(f"{doctor} ({abbr})")
+                            continue
                         # Парсим значение: если начинается с А/Р/Э — буква после скобки
                         letter = ''
                         time_part = value
                         if value and value[0] in 'АРЭ':
                             letter = value[0]
                             time_part = value[1:]
-                        # Формат: "Иванов И.И. (ОТВ) 16-09" или "Иванов И.И. (ОАР)А 16-09"
                         if letter:
                             block_lines.append(f"{doctor} ({abbr}){letter} {time_part}")
                         else:
@@ -224,6 +227,14 @@ def save_to_word(all_data, doctors_by_dept, sorted_depts, output_file,
                 run = p.add_run(line)
                 run.font.name = 'Calibri'
                 run.font.size = Pt(10)
+                
+                # <-- ДОБАВЛЕНО: Проверка на администрацию для жирного шрифта
+                # Жирный шрифт для администрации
+                if "(АДМ)" in line:
+                    run.font.bold = True
+                else:
+                    run.font.bold = False
+                    
                 row += 1
 
             is_last_block = (block_idx == len(blocks) - 1)
