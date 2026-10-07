@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """make_docs.py — генератор документации Grafikus (актуально для v8.1.1):
-README.md, Digest.md, AI_BRIEF.md, ARCHITECTURE.md, CHANGELOG.md,
+README.md, DIGEST.md, AI_BRIEF.md, ARCHITECTURE.md, CHANGELOG.md,
 DEVLOG.md, TODO.md, QWEN.md — в корень;
 USER_MANUAL.md + USER_MANUAL.docx + USER_MANUAL.pdf — в project_info/manuals/.
 
@@ -103,7 +103,7 @@ DOCS["README.md"] = [
     "## Документация",
     "",
     "- `ARCHITECTURE.md` — слои, потоки данных, парсеры.",
-    "- `Digest.md` — короткая сводка в один экран (для быстрого входа в контекст).",
+    "- `DIGEST.md` — короткая сводка в один экран (для быстрого входа в контекст).",
     "- `AI_BRIEF.md` — правила и табу для ИИ-ассистента.",
     "- `CHANGELOG.md` — история версий.",
     "- `DEVLOG.md` — журнал сессий разработки (включая неудачные ветки).",
@@ -137,7 +137,7 @@ DOCS["README.md"] = [
 ]
 
 # ================================================================
-DOCS["Digest.md"] = [
+DOCS["DIGEST.md"] = [
     "# Digest — дайджест проекта Grafikus (v8.1.1)",
     "",
     "Короткая сводка для быстрого входа в контекст (люди и AI-ассистенты).",
@@ -264,7 +264,7 @@ DOCS["AI_BRIEF.md"] = [
     "## 📚 Связанные документы",
     "",
     "- `ARCHITECTURE.md` — слои и потоки данных.",
-    "- `Digest.md` — короткая сводка.",
+    "- `DIGEST.md` — короткая сводка.",
     "- `QWEN.md` — маркеры целостности и типовые ловушки.",
     "- `DEVLOG.md` — что делали и что теряли (важно для контекста).",
 ]
@@ -424,7 +424,7 @@ DOCS["CHANGELOG.md"] = [
     "- Генератор документации переведён на Word-путь (как в sonolog):",
     "  `USER_MANUAL.md` → `USER_MANUAL.docx` (python-docx + логотип) →",
     "  `USER_MANUAL.pdf` (docx2pdf через Word). Fallback — fpdf2.",
-    "- Новый набор проектных документов в корне: `Digest.md`, `DEVLOG.md`,",
+    "- Новый набор проектных документов в корне: `DIGEST.md`, `DEVLOG.md`,",
     "  `TODO.md`, `QWEN.md` (в дополнение к README/AI_BRIEF/ARCHITECTURE/",
     "  CHANGELOG).",
     "- Папка `assets/` — логотип `project_logo.png` и иконка",
@@ -595,7 +595,7 @@ DOCS["DEVLOG.md"] = [
     "",
     "- `make_docs.py` переписан по образцу sonolog:",
     "  - каркас `_find_root` / `BASE_DIR` / `MANUALS_DIR` / `ASSETS_DIR`;",
-    "  - словарь `DOCS` (README, Digest, AI_BRIEF, ARCHITECTURE, CHANGELOG,",
+    "  - словарь `DOCS` (README, DIGEST, AI_BRIEF, ARCHITECTURE, CHANGELOG,",
     "    DEVLOG, TODO, QWEN, USER_MANUAL);",
     "  - `render_md_to_docx` (python-docx + логотип + авто-нумерация);",
     "  - `render_md_to_pdf` (docx2pdf через Word → fallback fpdf2);",
@@ -734,7 +734,7 @@ DOCS["QWEN.md"] = [
     "",
     "- Архитектура: см. `ARCHITECTURE.md`.",
     "- Журнал сессий и потери: см. `DEVLOG.md`. Открытые задачи: см. `TODO.md`.",
-    "- Быстрый вход в контекст: см. `Digest.md`.",
+    "- Быстрый вход в контекст: см. `DIGEST.md`.",
     "- Правила для ИИ: см. `AI_BRIEF.md`.",
     "",
     "## Маркеры целостности core/",

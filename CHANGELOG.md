@@ -41,7 +41,7 @@
 - Генератор документации переведён на Word-путь (как в sonolog):
   `USER_MANUAL.md` → `USER_MANUAL.docx` (python-docx + логотип) →
   `USER_MANUAL.pdf` (docx2pdf через Word). Fallback — fpdf2.
-- Новый набор проектных документов в корне: `Digest.md`, `DEVLOG.md`,
+- Новый набор проектных документов в корне: `DIGEST.md`, `DEVLOG.md`,
   `TODO.md`, `QWEN.md` (в дополнение к README/AI_BRIEF/ARCHITECTURE/
   CHANGELOG).
 - Папка `assets/` — логотип `project_logo.png` и иконка

@@ -69,7 +69,7 @@
 
 - `make_docs.py` переписан по образцу sonolog:
   - каркас `_find_root` / `BASE_DIR` / `MANUALS_DIR` / `ASSETS_DIR`;
-  - словарь `DOCS` (README, Digest, AI_BRIEF, ARCHITECTURE, CHANGELOG,
+  - словарь `DOCS` (README, DIGEST, AI_BRIEF, ARCHITECTURE, CHANGELOG,
     DEVLOG, TODO, QWEN, USER_MANUAL);
   - `render_md_to_docx` (python-docx + логотип + авто-нумерация);
   - `render_md_to_pdf` (docx2pdf через Word → fallback fpdf2);
