@@ -511,8 +511,11 @@ def build_git_state(root: Path) -> str | None:
     out = []
     for args in (["log", "--oneline", "-15"], ["status", "--short"], ["tag", "-l"]):
         try:
-            r = subprocess.run(["git"] + args, cwd=root,
-                               capture_output=True, text=True, timeout=15)
+            r = subprocess.run(
+                ["git"] + args, cwd=root,
+                capture_output=True, text=True, timeout=15,
+                encoding="utf-8", errors="replace",
+            )
             out.append(f"$ git {' '.join(args)}\n{r.stdout.strip()}\n")
         except Exception:
             return None

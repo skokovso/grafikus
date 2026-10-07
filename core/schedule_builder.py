@@ -14,6 +14,7 @@ from parsers.surgery import parse_surgery_pdf, parse_surgery_txt
 from parsers.multisheet import parse_excel_with_months
 from output.word_builder import save_to_word
 from output.txt_builder import save_to_txt
+from parsers.administration import parse_administration_graph
 
 def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
                           selected_month, selected_year):
@@ -98,7 +99,10 @@ def build_master_schedule(input_folder, rukovoditel_text, ploshadka_text,
         print(f"   📛 Сокращение: {get_dept_abbr(dept_name)}")
 
         # Выбор парсера
-        if dept_name == 'ОАР' or 'ОАР' in file_path.name:
+        if 'администрация' in file_path.name.lower():
+            # Передаем выбранную площадку для фильтрации!
+            data, detected_dept, months, years = parse_administration_graph(file_path, ploshadka_text)
+        elif dept_name == 'ОАР' or 'ОАР' in file_path.name:
             data, detected_dept, months, years = parse_oar_graph(file_path, dept_name)
         elif dept_name == 'Ответственные по стационару' or 'ответственн' in dept_name.lower() or 'Ответственные' in file_path.name:
             data, detected_dept, months, years = parse_responsible_graph(file_path, dept_name)
